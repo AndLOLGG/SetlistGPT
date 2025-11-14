@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org" lang="en">
+<head>
+    <meta charset="utf-8" />
+    <title>Create Profile - SetlistGPT</title>
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <link rel="stylesheet" th:href="@{/styles.css}" href="/styles.css" />
+</head>
+<body>
+<header>
+    <h1>Create a Profile</h1>
+    <p>Create a MUSICIAN profile to start adding repertoires and songs.</p>
+</header>
+
+<main>
+    <section>
+        <form id="signupForm" class="signup-box" th:action="@{/api/profile/signup}" method="post" onsubmit="return false;">
+            <div>
+                <label for="name">Username</label>
+                <input id="name" name="name" type="text" placeholder="Choose a username" required />
+            </div>
+            <div>
+                <label for="password">Password</label>
+                <input id="password" name="password" type="password" placeholder="Choose a password" required />
+            </div>
+            <div>
+                <button type="submit">Create Profile</button>
+                <a href="/" class="button-link">Cancel</a>
+            </div>
+            <div id="status" aria-live="polite"></div>
+        </form>
+    </section>
+</main>
+
+<footer>
+    <p>&copy; SetlistGPT</p>
+</footer>
+
+<script th:src="@{/javascript/frontpage.js}" src="/javascript/frontpage.js" defer></script>
+<script th:src="@{/javascript/create-profile.js}" src="/javascript/create-profile.js" defer></script>
+</body>
+</html>
