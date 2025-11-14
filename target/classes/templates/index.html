@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org" lang="en">
+<head>
+    <meta charset="utf-8" />
+    <title>SetlistGPT Startpage</title>
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <link rel="stylesheet" th:href="@{/styles.css}" href="/styles.css" />
+</head>
+<body>
+<header>
+    <h1>Welcome to SetlistGPT</h1>
+    <h2>Here you can create repertoires, add songs, and have our GPT create setlists for you</h2>
+    <p class="meta">Choose an action below. Adjust API paths in the script to match your controllers/services.</p>
+</header>
+
+<!-- Navigation for public view -->
+<section id="publicNav" class="hidden">
+    <div class="actions">
+        <button id="publicRepsNavBtn">Public Repertoires</button>
+        <button id="publicSetlistsNavBtn">Public Setlists</button>
+        <button id="publicBackBtn">Back</button>
+    </div>
+</section>
+
+<!-- Public view shown before login -->
+<section id="publicView">
+    <div class="actions">
+        <button id="createProfileBtn">Create Profile</button>
+        <!-- create-profile.js removed from index; it will be included only on the profile-create page -->
+        <button id="showLoginBtn">Login</button>
+        <button id="publicRepsBtn">See Public Repertoires and Setlists</button>
+    </div>
+
+    <div id="loginArea" class="hidden">
+        <form id="loginForm" class="login-box">
+            <input id="username" type="text" placeholder="Username" required />
+            <input id="password" type="password" placeholder="Password" required />
+            <button id="loginBtn">Sign In</button>
+            <span id="publicStatus"></span>
+        </form>
+    </div>
+
+    <div id="publicResults"></div>
+</section>
+
+<!-- Authenticated view shown after login -->
+<section id="authView" class="hidden">
+    <div class="controls">
+        <button id="repsBtn">Repertoires</button>
+        <button id="setlistsBtn">Setlists</button>
+        <button id="songsBtn">Songs</button>
+        <button id="logoutBtn">Logout</button>
+    </div>
+
+    <div id="authContent">
+        <p class="meta">Select a section to load data.</p>
+        <div id="contentArea"></div>
+    </div>
+</section>
+
+<footer>
+    <p>
+        <a href="https://getsongbpm.com">Backlink: GetSongBPM</a>
+    </p>
+</footer>
+<script th:src="@{/javascript/frontpage.js}" src="/javascript/frontpage.js" defer></script>
+</body>
+</html>
