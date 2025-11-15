@@ -15,6 +15,7 @@ public class AdminRepertoireSummaryDto {
 
     public static AdminRepertoireSummaryDto from(Repertoire r) {
         int cnt = (r.getSongs() == null) ? 0 : r.getSongs().size();
-        return new AdminRepertoireSummaryDto(r.getId(), r.getTitle(), cnt);
+        String title = (r.getName() == null) ? "" : r.getName();
+        return new AdminRepertoireSummaryDto(r.getId(), title, cnt);
     }
 }

@@ -115,8 +115,9 @@ public class AdminController {
         Optional<Setlist> slOpt = setlists.findById(setlistId);
         if (slOpt.isEmpty()) return ResponseEntity.notFound().build();
 
+        // Fixed: avoid comparing a primitive to null by using the primitive accessor directly.
         List<AdminSongListItemDto> songs = slOpt.get().getItems().stream()
-                .sorted(Comparator.comparingInt(i -> i.getPositionIndex() == null ? 0 : i.getPositionIndex()))
+                .sorted(Comparator.comparingInt(i -> i.getPositionIndex()))
                 .map(i -> AdminSongListItemDto.from(i.getSong()))
                 .toList();
 
