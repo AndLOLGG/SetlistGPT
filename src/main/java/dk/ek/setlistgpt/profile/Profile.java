@@ -1,6 +1,6 @@
 package dk.ek.setlistgpt.profile;
 
-import com.fasterxml.jackson.annotation.JsonIgnore;
+import com.fasterxml.jackson.annotation.JsonProperty;
 import jakarta.persistence.*;
 import lombok.*;
 
@@ -21,9 +21,10 @@ public class Profile {
     @Column(nullable = false)
     private String name; // unique username
 
-    @JsonIgnore // do not send passwords in API responses
+    // Write-only: accept in requests, omit from responses
+    @JsonProperty(access = JsonProperty.Access.WRITE_ONLY)
     @Column(nullable = false)
-    private String password; // TODO: hash in a real setup
+    private String password; // TODO: hash in production
 
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)

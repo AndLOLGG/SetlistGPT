@@ -14,7 +14,8 @@
 
 <main>
     <section>
-        <form id="signupForm" class="signup-box" th:action="@{/api/profile/signup}" method="post" onsubmit="return false;">
+        <!-- JS-only submission: no action/method so the browser won't POST form-urlencoded -->
+        <form id="signupForm" class="signup-box">
             <div>
                 <label for="name">Username</label>
                 <input id="name" name="name" type="text" placeholder="Choose a username" required />
@@ -24,7 +25,8 @@
                 <input id="password" name="password" type="password" placeholder="Choose a password" required />
             </div>
             <div>
-                <button type="submit">Create Profile</button>
+                <!-- type=button prevents native form submit -->
+                <button id="createProfileBtn" type="button">Create Profile</button>
                 <a href="/" class="button-link">Cancel</a>
             </div>
             <div id="status" aria-live="polite"></div>
@@ -37,6 +39,7 @@
 </footer>
 
 <script th:src="@{/javascript/frontpage.js}" src="/javascript/frontpage.js" defer></script>
-<script th:src="@{/javascript/create-profile.js}" src="/javascript/create-profile.js" defer></script>
+<!-- cache-bust to avoid stale JS -->
+<script th:src="@{/javascript/create-profile.js(v=3)}" src="/javascript/create-profile.js?v=3" defer></script>
 </body>
 </html>

@@ -32,6 +32,9 @@ public class MoodCalculator {
         putGroup(SongMood.MELANCHOLIC, SongMood.SAD, SongMood.DARK, SongMood.NOSTALGIC);
         putGroup(SongMood.DREAMY, SongMood.MELLOW, SongMood.ROMANTIC, SongMood.CHILL);
         putGroup(SongMood.NOSTALGIC, SongMood.MELLOW, SongMood.DREAMY, SongMood.MELANCHOLIC);
+        // Added explicit groups:
+        putGroup(SongMood.CALM, SongMood.CHILL, SongMood.MELLOW, SongMood.DREAMY);
+        putGroup(SongMood.ANGRY, SongMood.INTENSE, SongMood.DRIVING, SongMood.DARK);
     }
 
     private static void putGroup(SongMood key, SongMood... others) {

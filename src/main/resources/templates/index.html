@@ -2,67 +2,61 @@
 <html xmlns:th="http://www.thymeleaf.org" lang="en">
 <head>
     <meta charset="utf-8" />
-    <title>SetlistGPT Startpage</title>
+    <title>SetlistGPT</title>
     <meta name="viewport" content="width=device-width,initial-scale=1" />
     <link rel="stylesheet" th:href="@{/styles.css}" href="/styles.css" />
 </head>
 <body>
 <header>
-    <h1>Welcome to SetlistGPT</h1>
-    <h2>Here you can create repertoires, add songs, and have our GPT create setlists for you</h2>
-    <p class="meta">Choose an action below. Adjust API paths in the script to match your controllers/services.</p>
+    <h1>SetlistGPT</h1>
 </header>
 
-<!-- Navigation for public view -->
-<section id="publicNav" class="hidden">
-    <div class="actions">
-        <button id="publicRepsNavBtn">Public Repertoires</button>
-        <button id="publicSetlistsNavBtn">Public Setlists</button>
-        <button id="publicBackBtn">Back</button>
-    </div>
-</section>
-
-<!-- Public view shown before login -->
 <section id="publicView">
-    <div class="actions">
-        <button id="createProfileBtn">Create Profile</button>
-        <!-- create-profile.js removed from index; it will be included only on the profile-create page -->
-        <button id="showLoginBtn">Login</button>
-        <button id="publicRepsBtn">See Public Repertoires and Setlists</button>
+    <p class="meta">Choose an action below.</p>
+
+    <!-- Home actions (default) -->
+    <div class="actions" id="publicHomeActions">
+        <button id="createProfileBtn" type="button">Create Profile</button>
+        <button id="showLoginBtn" type="button">Login</button>
+        <button id="seePublicBtn" type="button">See Public Repertoires &amp; Setlists</button>
+    </div>
+
+    <!-- Public browser (shown after See Public...) -->
+    <div class="actions hidden" id="publicBrowseActions">
+        <button id="publicRepertoiresBtn" type="button">Public Repertoires</button>
+        <button id="publicSetlistsBtn" type="button">Public Setlists</button>
+        <button id="backToPublicBtn" type="button">Back</button>
     </div>
 
     <div id="loginArea" class="hidden">
-        <form id="loginForm" class="login-box">
-            <input id="username" type="text" placeholder="Username" required />
-            <input id="password" type="password" placeholder="Password" required />
-            <button id="loginBtn">Sign In</button>
-            <span id="publicStatus"></span>
-        </form>
+        <div class="form">
+            <label>Username <input id="username" type="text" /></label>
+            <label>Password <input id="password" type="password" /></label>
+            <button id="loginBtn" type="button">Login</button>
+        </div>
     </div>
 
+    <div id="publicStatus" class="meta" aria-live="polite"></div>
     <div id="publicResults"></div>
 </section>
 
-<!-- Authenticated view shown after login -->
 <section id="authView" class="hidden">
-    <div class="controls">
-        <button id="repsBtn">Repertoires</button>
-        <button id="setlistsBtn">Setlists</button>
-        <button id="songsBtn">Songs</button>
-        <button id="logoutBtn">Logout</button>
+    <p class="meta">Choose an action below.</p>
+    <div class="actions">
+        <button id="newRepertoireBtn" type="button">New Repertoire</button>
+        <button id="myRepertoiresBtn" type="button">My Repertoires</button>
+        <button id="newSetlistBtn" type="button">New Setlist</button>
+        <button id="setlistsBtn" type="button">My Setlists</button>
+        <button id="logoutBtn" type="button">Logout</button>
     </div>
-
-    <div id="authContent">
-        <p class="meta">Select a section to load data.</p>
-        <div id="contentArea"></div>
-    </div>
+    <div id="contentArea"></div>
 </section>
 
 <footer>
-    <p>
-        <a href="https://getsongbpm.com">Backlink: GetSongBPM</a>
-    </p>
+    <p>&copy; SetlistGPT</p>
 </footer>
-<script th:src="@{/javascript/frontpage.js}" src="/javascript/frontpage.js" defer></script>
+
+<script th:src="@{/javascript/frontpage.js(v=10)}" src="/javascript/frontpage.js?v=10" defer></script>
+<script th:src="@{/javascript/create-profile.js(v=3)}" src="/javascript/create-profile.js?v=3" defer></script>
 </body>
 </html>

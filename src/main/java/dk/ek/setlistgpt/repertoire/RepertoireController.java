@@ -19,13 +19,51 @@ public class RepertoireController {
         this.repertoireService = repertoireService;
     }
 
-    // Public endpoint: Guests can browse public setlists without login
+    // Public endpoint: list PUBLIC repertoires
     @GetMapping("/public")
     public List<Repertoire> listPublic() {
         return repo.findByVisibility(RepertoireVisibility.PUBLIC);
     }
 
-    // Change visibility (secure this later)
+    // List ALL repertoires (temporary: no profile scoping yet)
+    @GetMapping
+    public List<Repertoire> listAll() {
+        return repo.findAll();
+    }
+
+    // Create a new repertoire (temporary: not scoped to user; secure later)
+    @PostMapping
+    public ResponseEntity<Repertoire> create(@RequestBody Repertoire body) {
+        if (body == null || body.getName() == null || body.getName().trim().isEmpty()) {
+            return ResponseEntity.badRequest().build();
+        }
+        Repertoire r = new Repertoire();
+        r.setName(body.getName().trim());
+        // default PRIVATE unless explicitly PUBLIC
+        r.setVisibility(body.getVisibility() == RepertoireVisibility.PUBLIC
+                ? RepertoireVisibility.PUBLIC
+                : RepertoireVisibility.PRIVATE);
+        Repertoire saved = repo.save(r);
+        return ResponseEntity.status(HttpStatus.CREATED).body(saved);
+    }
+
+    // Get single repertoire (includes songs via JSON managed reference)
+    @GetMapping("/{id}")
+    public ResponseEntity<Repertoire> getOne(@PathVariable Long id) {
+        return repo.findById(id)
+                .map(ResponseEntity::ok)
+                .orElseGet(() -> ResponseEntity.notFound().build());
+    }
+
+    // List songs for a repertoire
+    @GetMapping("/{id}/songs")
+    public ResponseEntity<List<Song>> getSongs(@PathVariable Long id) {
+        return repo.findById(id)
+                .map(r -> ResponseEntity.ok(r.getSongs()))
+                .orElseGet(() -> ResponseEntity.notFound().build());
+    }
+
+    // Change visibility (secure later)
     @PutMapping("/{id}/visibility")
     public ResponseEntity<Repertoire> updateVisibility(
             @PathVariable Long id,
@@ -38,7 +76,7 @@ public class RepertoireController {
                 .orElseGet(() -> ResponseEntity.notFound().build());
     }
 
-    // Link an existing song to a repertoire (uses Repertoire.addSong(...)).
+    // Link existing song
     @PostMapping("/{repertoireId}/songs/{songId}")
     public ResponseEntity<Song> addSongToRepertoire(@PathVariable Long repertoireId, @PathVariable Long songId) {
         try {
@@ -50,7 +88,7 @@ public class RepertoireController {
         }
     }
 
-    // Unlink/remove a song from a repertoire (uses Repertoire.removeSong(...)).
+    // Unlink song
     @DeleteMapping("/{repertoireId}/songs/{songId}")
     public ResponseEntity<Void> removeSongFromRepertoire(@PathVariable Long repertoireId, @PathVariable Long songId) {
         boolean removed = repertoireService.removeSongFromRepertoire(repertoireId, songId);

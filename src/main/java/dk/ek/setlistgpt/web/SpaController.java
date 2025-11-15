@@ -40,16 +40,40 @@ public class SpaController implements ErrorController {
             "/setlists",
             "/setlists/**",
             "/songs",
-            "/songs/**"
+            "/songs/**",
+            "/admin",
+            "/admin/**" // added admin SPA routes (front-end guarded; data protected server-side)
+            // (Original explicit SPA route list preserved)
     })
     public String index() {
         return "index";
     }
 
+    // Added: static resource passthroughs (do not remove original comments above)
+    @GetMapping("/manifest.json")
+    public String manifest() {
+        return "forward:/manifest.json";
+    }
+
+    @GetMapping("/service-worker.js")
+    public String serviceWorker() {
+        return "forward:/service-worker.js";
+    }
+
+    @GetMapping("/robots.txt")
+    public String robots() {
+        return "forward:/robots.txt";
+    }
+
     @RequestMapping("${server.error.path:${error.path:/error}}")
     public String handleError(HttpServletRequest request, HttpServletResponse response, Model model) {
         ServletWebRequest swr = new ServletWebRequest(request);
-        Map<String, Object> attrs = errorAttributes.getErrorAttributes(swr, ErrorAttributeOptions.defaults());
+        // Original retrieval kept; excluding stack trace can be enabled if desired:
+        Map<String, Object> attrs = errorAttributes.getErrorAttributes(
+                swr,
+                ErrorAttributeOptions.defaults()
+                // .excluding(ErrorAttributeOptions.Include.STACK_TRACE) // optional
+        );
 
         // Try to get the original status code from the request attributes (forwarded)
         Integer forwardedStatus = (Integer) request.getAttribute(RequestDispatcher.ERROR_STATUS_CODE);

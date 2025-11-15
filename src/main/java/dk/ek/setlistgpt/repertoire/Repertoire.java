@@ -1,5 +1,7 @@
 package dk.ek.setlistgpt.repertoire;
 
+import com.fasterxml.jackson.annotation.JsonBackReference;
+import dk.ek.setlistgpt.profile.Profile;
 import dk.ek.setlistgpt.song.Song;
 
 import com.fasterxml.jackson.annotation.JsonManagedReference;
@@ -28,6 +30,12 @@ public class Repertoire {
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)
     private RepertoireVisibility visibility = RepertoireVisibility.PRIVATE;
+
+    // Owner (nullable to keep backward compatibility with existing data)
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "owner_id")
+    @JsonBackReference
+    private Profile owner;
 
     @OneToMany(mappedBy = "repertoire", cascade = CascadeType.ALL, orphanRemoval = true)
     @JsonManagedReference

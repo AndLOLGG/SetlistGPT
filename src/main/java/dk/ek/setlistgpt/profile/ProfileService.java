@@ -41,6 +41,10 @@ public class ProfileService {
 
     @Transactional
     public Profile createProfile(Profile profile) {
+        if (profile == null) throw new IllegalArgumentException("profile required");
+        if (profile.getName() == null || profile.getName().isBlank()) throw new IllegalArgumentException("name is required");
+        if (profile.getPassword() == null || profile.getPassword().isBlank()) throw new IllegalArgumentException("password is required");
+
         if (profile.getType() == null) profile.setType(ProfileType.MUSICIAN);
         // signal conflict to controller for HTTP 409
         if (repo.existsByName(profile.getName())) return null;

@@ -7,4 +7,8 @@ import java.util.List;
 /** Spring Data JPA repository for Repertoire */
 public interface RepertoireRepository extends JpaRepository<Repertoire, Long> {
     List<Repertoire> findByVisibility(RepertoireVisibility visibility);
+
+    // Admin helpers
+    List<Repertoire> findByOwnerId(Long ownerId);
+    long countByOwnerId(Long ownerId);
 }

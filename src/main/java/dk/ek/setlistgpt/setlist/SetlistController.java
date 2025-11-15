@@ -1,10 +1,11 @@
 package dk.ek.setlistgpt.setlist;
 
-import lombok.*;
+import dk.ek.setlistgpt.profile.Profile;
 import dk.ek.setlistgpt.song.Song;
 import org.springframework.http.ResponseEntity;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 
 import java.util.List;
@@ -31,9 +32,14 @@ public class SetlistController {
         return ResponseEntity.status(201).body(saved);
     }
 
+    @GetMapping("/setlists")
+    public List<SetlistSummaryDto> listSetlists() {
+        return service.listSetlists();
+    }
+
     @PostMapping("/setlist")
-    public ResponseEntity<List<Song>> buildSetlist(
-            @Valid @RequestBody SetlistRequest request) {
+    public ResponseEntity<List<Song>> buildSetlist(@Valid @RequestBody SetlistRequest request,
+                                                   HttpServletRequest http) {
         if (!service.validateInput(request.getTitle(), request.getArtist())) {
             return ResponseEntity.badRequest().build();
         }
@@ -45,14 +51,23 @@ public class SetlistController {
             return ResponseEntity.badRequest().build();
         }
 
-        List<Song> filtered = service.filterSongsByCriteria(request.getTitle(), request.getArtist(), request.getGenre(), request.getBpm(), request.getMood());
+        List<Song> filtered = service.filterSongsByCriteria(
+                request.getTitle(), request.getArtist(), request.getGenre(), null, request.getMood());
 
-        // Pass desired mood and bpm (may be null) — service treats them as optional
-        List<Song> setlist = service.buildSetList(filtered, duration, request.getMood(), request.getBpm());
+        List<Song> setlist = service.buildSetList(filtered, duration, request.getMood(), null);
 
         if (request.isAllowReuse()) {
-            setlist = service.fillSetWithReusedSongs(setlist, duration, true, request.getMood(), request.getBpm());
+            setlist = service.fillSetWithReusedSongs(setlist, duration, true, request.getMood(), null);
         }
+
+        // Attach owner if logged in (admins and musicians can both create)
+        Profile owner = null;
+        var session = http.getSession(false);
+        if (session != null) {
+            Object p = session.getAttribute("profile");
+            if (p instanceof Profile) owner = (Profile) p;
+        }
+        service.saveBuiltSetlist(owner, request.getTitle(), setlist);
 
         return ResponseEntity.ok(setlist);
     }
