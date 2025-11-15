@@ -11,6 +11,10 @@ import org.springframework.web.bind.annotation.*;
 
 import java.util.Map;
 
+/**
+ * Shim controller to handle /api/login requests with JSON or form data,
+ * authenticating and creating session as needed.
+ */
 @RestController
 @RequestMapping("/api")
 public class LoginShimController {
