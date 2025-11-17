@@ -18,7 +18,7 @@ SetlistGPT combines the power of Groq's advanced language models with GetSongBPM
 
 ### Prerequisites
 
-- Python 3.8 or higher
+- Java 21 or higher
 - Groq API key
 - GetSongBPM API key
 
@@ -35,20 +35,6 @@ pip install -r requirements.txt
 # Set up your API keys
 cp .env.example .env
 # Edit .env with your API keys
-```
-
-### Usage
-
-```python
-# Example usage (to be implemented)
-from setlist_gpt import SetlistGenerator
-
-generator = SetlistGenerator()
-setlist = generator.create_setlist(
-    duration_minutes=60,
-    genre="electronic",
-    energy_level="high"
-)
 ```
 
 ## 📋 How It Works
