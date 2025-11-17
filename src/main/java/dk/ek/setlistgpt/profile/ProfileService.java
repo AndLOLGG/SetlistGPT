@@ -1,6 +1,7 @@
 package dk.ek.setlistgpt.profile;
 
 import jakarta.annotation.PostConstruct;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -8,9 +9,11 @@ import org.springframework.transaction.annotation.Transactional;
 public class ProfileService {
 
     private final ProfileRepository repo;
+    private final PasswordEncoder passwordEncoder;
 
-    public ProfileService(ProfileRepository repo) {
+    public ProfileService(ProfileRepository repo, PasswordEncoder passwordEncoder) {
         this.repo = repo;
+        this.passwordEncoder = passwordEncoder;
     }
 
     @PostConstruct
@@ -20,7 +23,7 @@ public class ProfileService {
         if (!repo.existsByName("admin")) {
             Profile admin = Profile.builder()
                     .name("admin")
-                    .password("admin")
+                    .password(passwordEncoder.encode("admin"))
                     .type(ProfileType.ADMIN)
                     .build();
             repo.save(admin);
@@ -30,7 +33,10 @@ public class ProfileService {
     @Transactional(readOnly = true)
     public Profile authenticateAndGetProfile(String name, String password) {
         return repo.findByName(name)
-                .filter(p -> p.getPassword().equals(password))
+                .filter(p -> {
+                    String stored = p.getPassword();
+                    return stored != null && password != null && passwordEncoder.matches(password, stored);
+                })
                 .orElse(null);
     }
 
@@ -48,6 +54,9 @@ public class ProfileService {
         if (profile.getType() == null) profile.setType(ProfileType.MUSICIAN);
         // signal conflict to controller for HTTP 409
         if (repo.existsByName(profile.getName())) return null;
+
+        // encode password before saving
+        profile.setPassword(passwordEncoder.encode(profile.getPassword()));
         return repo.save(profile);
     }
 
@@ -59,7 +68,21 @@ public class ProfileService {
     @Transactional
     public Profile updateProfile(Profile profile) {
         if (profile.getId() == null) return null;
-        return repo.save(profile);
+        var existingOpt = repo.findById(profile.getId());
+        if (existingOpt.isEmpty()) return null;
+        Profile existing = existingOpt.get();
+
+        // Update fields safely: name, type, password (encode if provided)
+        if (profile.getName() != null && !profile.getName().isBlank()) {
+            existing.setName(profile.getName());
+        }
+        if (profile.getType() != null) {
+            existing.setType(profile.getType());
+        }
+        if (profile.getPassword() != null && !profile.getPassword().isBlank()) {
+            existing.setPassword(passwordEncoder.encode(profile.getPassword()));
+        }
+        return repo.save(existing);
     }
 
     @Transactional

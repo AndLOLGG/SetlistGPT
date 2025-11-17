@@ -271,7 +271,17 @@ console.log('frontpage.js loaded');
         }
         if (createProfileBtn && !createProfileBtn.dataset.attached) {
             createProfileBtn.addEventListener('click', () => {
-                window.location.href='/profile';
+                // Prefer SPA inline renderer when available so Create Profile works without a full navigation.
+                try {
+                    if (window.CreateProfile && typeof window.CreateProfile.showCreateProfile === 'function') {
+                        window.CreateProfile.showCreateProfile();
+                        return;
+                    }
+                } catch (e) {
+                    // swallow and fall back to navigation
+                }
+                // Fallback: navigate to /profile (server serves the SPA)
+                window.location.href = '/profile';
             });
             createProfileBtn.dataset.attached='1';
         }
