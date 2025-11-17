@@ -4,13 +4,17 @@ import dk.ek.setlistgpt.profile.Profile;
 import dk.ek.setlistgpt.profile.ProfileRepository;
 import dk.ek.setlistgpt.profile.ProfileType;
 import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
 import jakarta.servlet.http.HttpSession;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.web.csrf.CookieCsrfTokenRepository;
+import org.springframework.security.web.csrf.CsrfToken;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.HashMap;
 import java.util.Map;
 
 /**
@@ -24,14 +28,17 @@ public class AuthController {
     private static final Logger log = LoggerFactory.getLogger(AuthController.class);
 
     private final ProfileRepository profiles;
+    private final CookieCsrfTokenRepository csrfRepo;
 
-    public AuthController(ProfileRepository profiles) {
+    public AuthController(ProfileRepository profiles, CookieCsrfTokenRepository csrfRepo) {
         this.profiles = profiles;
+        this.csrfRepo = csrfRepo;
     }
 
     @PostMapping("/login")
     public ResponseEntity<?> login(@RequestBody LoginRequest body,
-                                   HttpServletRequest request) {
+                                   HttpServletRequest request,
+                                   HttpServletResponse response) {
         if (body == null || body.getName() == null || body.getPassword() == null) {
             log.debug("Login attempt with missing credentials: bodyPresent={}, namePresent={}, passwordPresent={}",
                     body != null, body != null && body.getName() != null, body != null && body.getPassword() != null);
@@ -61,7 +68,6 @@ public class AuthController {
                 p = profiles.save(p);
                 log.debug("Promoted profile to ADMIN: id={} name='{}'", p.getId(), p.getName());
             } else {
-                // Accept the original "user" password for musicians and also allow "1234" for compatibility
                 boolean ok = (p.getType() == ProfileType.ADMIN && "admin".equals(password))
                         || (p.getType() == ProfileType.MUSICIAN && ("user".equals(password) || "1234".equals(password)));
                 if (!ok) {
@@ -76,11 +82,24 @@ public class AuthController {
         session.setAttribute("profile", p);
         log.debug("Authenticated name='{}' id={} type={} sessionId={}", p.getName(), p.getId(), p.getType(), session.getId());
 
-        return ResponseEntity.ok(Map.of(
-                "id", p.getId(),
-                "name", p.getName(),
-                "type", p.getType().name()
-        ));
+        // Generate and save a fresh CSRF token into the response cookie for the new session,
+        // using the shared repo configured in SecurityConfig.
+        CsrfToken newToken = csrfRepo.generateToken(request);
+        csrfRepo.saveToken(newToken, request, response);
+
+        // also set request attributes so filters like WriteCsrfCookieFilter can see it
+        request.setAttribute(CsrfToken.class.getName(), newToken);
+        request.setAttribute("_csrf", newToken);
+
+        String xsrf = newToken != null ? newToken.getToken() : null;
+
+        Map<String, Object> resp = new HashMap<>();
+        resp.put("id", p.getId());
+        resp.put("name", p.getName());
+        resp.put("type", p.getType().name());
+        if (xsrf != null) resp.put("xsrfToken", xsrf);
+
+        return ResponseEntity.ok(resp);
     }
 
     @PostMapping("/logout")

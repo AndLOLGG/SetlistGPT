@@ -3,18 +3,17 @@
     'use strict';
 
     function getCookie(n){const m=document.cookie.match('(?:^|; )'+n.replace(/([$?*|{}\]\\^])/g,'\\$1')+'=([^;]*)');return m?decodeURIComponent(m[1]):null;}
-    fetch('/api/login',{
-        method:'POST',
-        credentials:'include',
-        headers:{
-            'Content-Type':'application/json; charset=UTF-8',
-            'X-XSRF-TOKEN': getCookie('XSRF-TOKEN') || ''
-        },
-        body: JSON.stringify({ name:'admin', password:'admin' })
-    }).then(r=>r.json()).then(console.log).catch(console.error);
+    // fetch('/api/login',{
+    //     method:'POST',
+    //     credentials:'include',
+    //     headers:{
+    //         'Content-Type':'application/json; charset=UTF-8',
+    //         'X-XSRF-TOKEN': getCookie('XSRF-TOKEN') || ''
+    //     },
+    //     body: JSON.stringify({ name:'admin', password:'admin' })
+    // }).then(r=>r.json()).then(console.log).catch(console.error);
 
     function looksLikeCredentialForm(form) {
-        // Accept if action is /api/login OR it has username+password inputs
         try {
             const act = form.getAttribute('action') || '';
             const u = new URL(act, location.href);
@@ -89,19 +88,16 @@
     }
 
     function installLoginGuards() {
-        // Neutralize any form that looks like a credential form
         document.querySelectorAll('form').forEach((form) => {
             if (!looksLikeCredentialForm(form)) return;
 
             neutralizeForm(form);
 
-            // Force all submit-like buttons to be non-submitting
             form.querySelectorAll('input[type="submit"], button[type="submit"]').forEach((btn) => {
                 btn.setAttribute('data-original-type', btn.getAttribute('type') || 'submit');
                 btn.setAttribute('type', 'button');
             });
 
-            // Also handle explicit login button, if present
             const loginBtn = form.querySelector('button#loginBtn, button[name="login"], input[name="login"]');
             if (loginBtn && !loginBtn.dataset.loginGuardAttached) {
                 loginBtn.dataset.loginGuardAttached = 'true';
@@ -112,7 +108,6 @@
             }
         });
 
-        // Global capturing submit handler (Enter key, etc.)
         document.addEventListener('submit', (ev) => {
             const form = ev.target;
             if (!(form instanceof HTMLFormElement)) return;

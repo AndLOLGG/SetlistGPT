@@ -1,3 +1,4 @@
+// javascript
 /**
  * frontpage.js
  * - DOM helpers
@@ -8,6 +9,7 @@
  * - Create repertoire/setlist flow (multi‑set support)
  * - Public navigation handlers
  */
+console.log('frontpage.js loaded');
 (function () {
     'use strict';
 
@@ -16,6 +18,22 @@
     const show = (el) => el && el.classList.remove('hidden');
     const hide = (el) => el && el.classList.add('hidden');
     const clear = (el) => el && (el.innerHTML = '');
+
+    // Admin visibility helper
+    function updateAdminVisibility() {
+        const btn = $('adminBtn'); // element id in your HTML for the Admin button
+        if (!btn) return;
+        try {
+            const prof = JSON.parse(sessionStorage.getItem('profile') || 'null');
+            if (prof && prof.type === 'ADMIN') {
+                show(btn);
+            } else {
+                hide(btn);
+            }
+        } catch (e) {
+            hide(btn);
+        }
+    }
 
     // ---------- Enums mirrored from backend ----------
     const GENRE_GROUPS = [
@@ -88,6 +106,7 @@
         const status = $('publicStatus');
         if (status) status.textContent = '';
         enforceLeftAlignment();
+        updateAdminVisibility();
     }
     function showPublicBrowser() {
         show($('publicView'));
@@ -99,6 +118,7 @@
         const status = $('publicStatus');
         if (status) status.textContent = 'Browse public content.';
         enforceLeftAlignment();
+        updateAdminVisibility();
     }
     function showAuthView() {
         hide($('publicView'));
@@ -107,6 +127,7 @@
         const content = $('contentArea');
         if (content) content.innerHTML = '<p class="meta">Select an action.</p>';
         enforceLeftAlignment();
+        updateAdminVisibility();
     }
 
     // ---------- Render helpers ----------
@@ -157,6 +178,9 @@
 
         // Single canonical doLogin (form-encoded, sends XSRF header if cookie present)
         const doLogin = async () => {
+            // debug: ensure handler actually runs (helps track down native form submits)
+            console.log('doLogin invoked', { username: (document.getElementById('username')||{}).value });
+
             if (!status) return;
             const uEl = $('username');
             const pEl = $('password');
@@ -170,93 +194,44 @@
             if (loginBtn) loginBtn.disabled = true;
 
             try {
-                const form = new URLSearchParams();
-                form.append('username', u);
-                form.append('password', p);
-
-                // NOTE: remove `redirect: 'manual'` to avoid some browsers returning opaque status 0 for redirects.
-                const res = await fetch('/login', {
+                // Use the collected `u` and `p` (was incorrectly using `username`/`password`)
+                const profile = await fetchJson('/api/login', {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-                    body: form.toString(),
-                    credentials: 'include'
+                    body: { name: u, password: p }
                 });
 
-                console.debug('/login fetch ->', { status: res.status, statusText: res.statusText, url: res.url, redirected: res.redirected, type: res.type });
-                try { console.debug('Resp headers:', Array.from(res.headers.entries())); } catch (e) {}
+                // debug: show server-provided profile/xsrf token
+                console.log('login response', profile);
 
-                // If browser returned an opaque/zero result, treat as failure and fall back.
-                if (!res || res.status === 0 || (res.type === 'opaque' && !res.ok)) {
-                    throw new Error('Opaque / status 0 response from fetch');
-                }
-
-                const location = (res.headers.get('location') || '').toLowerCase();
-                const redirectedToError = (location && location.includes('error')) || (res.url && res.url.toLowerCase().includes('error'));
-                const success = (res.ok || res.status === 302 || res.status === 303 || res.status === 204 || res.redirected) && !redirectedToError;
-
-                if (success) {
-                    sessionStorage.setItem('authOk','1');
-                    status.textContent = '';
-                    hide(loginArea);
-                    showAuthView();
-                    try { attachAuthControls(); } catch (e) {}
-                    return;
-                }
-
-                // Try to build helpful message
-                let msg = `Login failed (status ${res.status}).`;
+                // Ensure browser receives Set-Cookie for XSRF-TOKEN before protected requests
                 try {
-                    const ct = res.headers.get('content-type') || '';
-                    if (ct.includes('application/json')) {
-                        const j = await res.clone().json().catch(()=>null);
-                        if (j && (j.error || j.message)) msg = 'Login failed: ' + (j.error || j.message);
-                    } else {
-                        const t = await res.clone().text().catch(()=>null);
-                        if (t) {
-                            const stripped = t.replace(/<[^>]*>/g,'').trim();
-                            if (stripped && stripped.length < 200) msg = 'Login failed: ' + stripped;
-                        }
+                    const csrfResp = await fetchJson('/api/csrf'); // fetchJson uses credentials:'include'
+                    if (!getCookie('XSRF-TOKEN') && csrfResp && csrfResp.token) {
+                        document.cookie = 'XSRF-TOKEN=' + encodeURIComponent(csrfResp.token) + '; path=/';
                     }
-                } catch (e) { /* ignore parse errors */ }
+                } catch (e) {
+                    if (profile && profile.xsrfToken) {
+                        document.cookie = 'XSRF-TOKEN=' + encodeURIComponent(profile.xsrfToken) + '; path=/';
+                    }
+                }
 
-                status.textContent = msg;
+                sessionStorage.setItem('authOk', '1');
+                try { sessionStorage.setItem('profile', JSON.stringify(profile)); } catch (e) {}
+                updateAdminVisibility();
+                status.textContent = '';
+                hide(loginArea);
+                showAuthView();
+                try { attachAuthControls(); } catch (e) {}
+                return;
             } catch (e) {
-                // Detailed debug info for network/opaque errors
-                console.error('doLogin fetch failed:', e);
-                // Fallback: submit a real form (ensures browser handles redirects/cookies)
-                try {
-                    const realForm = document.createElement('form');
-                    realForm.method = 'post';
-                    realForm.action = '/login';
-                    // ensure credentials are posted with expected parameter names
-                    const inU = document.createElement('input');
-                    inU.type = 'hidden';
-                    inU.name = 'username';
-                    inU.value = u;
-                    const inP = document.createElement('input');
-                    inP.type = 'hidden';
-                    inP.name = 'password';
-                    inP.value = p;
-                    realForm.appendChild(inU);
-                    realForm.appendChild(inP);
-
-                    // If a server-side CSRF hidden input exists on the page (Thymeleaf), clone it into the fallback form.
-                    const existingCsrf = document.querySelector('input[type="hidden"][name*="csrf"], input[type="hidden"][name*="_csrf"]');
-                    if (existingCsrf && existingCsrf.name && existingCsrf.value) {
-                        const cs = document.createElement('input');
-                        cs.type = 'hidden';
-                        cs.name = existingCsrf.name;
-                        cs.value = existingCsrf.value;
-                        realForm.appendChild(cs);
-                    }
-
-                    // append, submit and remove
-                    document.body.appendChild(realForm);
-                    realForm.submit();
-                    // do not reach the cleanup too soon; browser will navigate
-                } catch (formErr) {
-                    console.error('Fallback form submit failed:', formErr);
-                    status.textContent = 'Login failed.';
+                console.error('Login error:', e);
+                const msg = String(e && e.message ? e.message : 'Login failed');
+                if (/401|Unauthorized/i.test(msg)) {
+                    status.textContent = 'Invalid username or password.';
+                } else if (/Missing credentials|400/i.test(msg)) {
+                    status.textContent = 'Missing credentials.';
+                } else {
+                    status.textContent = msg.length > 200 ? msg.slice(0, 200) + '…' : msg;
                 }
             } finally {
                 if (loginBtn) loginBtn.disabled = false;
@@ -276,9 +251,13 @@
             loginBtn.dataset.attached='1';
         }
         const loginForm = $('loginForm');
-        if (loginForm && !loginForm.dataset.attached) {
-            loginForm.addEventListener('submit', e => { e.preventDefault(); doLogin(); });
-            loginForm.dataset.attached='1';
+        if (loginForm) {
+            try { loginForm.action = '#'; } catch (e) {}
+            if (!loginForm.dataset.attached) {
+                // non-capturing handler triggers the AJAX doLogin flow; native submits are prevented by the global capture guard.
+                loginForm.addEventListener('submit', e => { e.preventDefault(); doLogin(); });
+                loginForm.dataset.attached='1';
+            }
         }
         if (createProfileBtn && !createProfileBtn.dataset.attached) {
             createProfileBtn.addEventListener('click', () => {
@@ -372,6 +351,8 @@
             logoutBtn.addEventListener('click', async () => {
                 try { await fetchJson('/logout',{ method:'POST' }); } catch(e){}
                 sessionStorage.removeItem('authOk');
+                sessionStorage.removeItem('profile');
+                updateAdminVisibility();
                 showPublicHome();
             });
             logoutBtn.dataset.attached='1';
@@ -424,11 +405,235 @@
     function createRepertoireFlow() {
         const area = $('contentArea');
         if (!area) return;
+
+        const genreOptions = ['<option value="">(none)</option>', ...GENRES.map(g => `<option value="${escapeHtml(g)}">${escapeHtml(g)}</option>`)].join('');
+        const moodOptions = ['<option value="">(none)</option>', ...MOODS.map(m => `<option value="${escapeHtml(m)}">${escapeHtml(m)}</option>`)].join('');
+
         area.innerHTML = `
-            <h3>New Repertoire</h3>
-            <p>Not implemented in this snippet.</p>
-        `;
+        <h3>New Repertoire</h3>
+        <div class="form" style="text-align:left;display:flex;flex-direction:column;gap:12px;max-width:1100px;">
+            <div class="row" style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;">
+                <label style="min-width:120px;">Name
+                    <input id="repName" type="text" placeholder="Repertoire name">
+                </label>
+                <label style="display:flex;align-items:center;gap:8px;">
+                    <input id="repPublic" type="checkbox"> Public (viewable offline)
+                </label>
+                <label style="min-width:220px;">
+                    Number of rows
+                    <input id="repRows" type="number" min="0" value="3" style="width:80px;margin-left:6px;">
+                </label>
+                <button id="repMakeRowsBtn" type="button">Generate rows</button>
+                <button id="repAddRowBtn" type="button">Add song</button>
+                <button id="repClearBtn" type="button">Clear rows</button>
+            </div>
+
+            <div id="repRowsContainer" style="display:flex;flex-direction:column;gap:10px;margin-top:8px;"></div>
+
+            <div style="display:flex;gap:12px;align-items:center;margin-top:8px;">
+                <button id="repCreateBtn" type="button">Create Repertoire</button>
+                <span id="repStatus" class="meta" aria-live="polite"></span>
+            </div>
+        </div>
+    `;
         enforceLeftAlignment();
+
+        const container = $('repRowsContainer');
+        const rowsInput = $('repRows');
+        const makeRowsBtn = $('repMakeRowsBtn');
+        const addRowBtn = $('repAddRowBtn');
+        const clearBtn = $('repClearBtn');
+        const createBtn = $('repCreateBtn');
+        const status = $('repStatus');
+
+        // helper: create a single song row DOM and append
+        let rowCounter = 0;
+        function appendSongRow(defaults = {}) {
+            rowCounter += 1;
+            const id = 'repSongRow' + rowCounter;
+            const title = escapeHtml(defaults.title || '');
+            const artist = escapeHtml(defaults.artist || '');
+            const bpm = defaults.bpm != null ? String(defaults.bpm) : '';
+            const minutes = (typeof defaults.durationMinutes === 'number') ? defaults.durationMinutes : 0;
+            const seconds = (typeof defaults.durationSeconds === 'number') ? defaults.durationSeconds : 30;
+
+            const html = `
+            <div id="${id}" class="repSongRow" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;border:1px solid #ddd;padding:8px;">
+                <label style="min-width:160px;">Title
+                    <input class="repTitle" type="text" value="${title}" placeholder="Title">
+                </label>
+                <label style="min-width:160px;">Artist
+                    <input class="repArtist" type="text" value="${artist}" placeholder="Artist">
+                </label>
+                <label style="min-width:140px;">Genre
+                    <select class="repGenre">${GENRES.map(g => `<option value="${escapeHtml(g)}">${escapeHtml(g)}</option>`).join('')}</select>
+                </label>
+                <label style="min-width:100px;">BPM
+                    <input class="repBpm" type="number" min="1" max="300" value="${escapeHtml(bpm)}" style="width:80px;">
+                </label>
+                <label style="min-width:140px;">Mood
+                    <select class="repMood">${MOODS.map(m => `<option value="${escapeHtml(m)}">${escapeHtml(m)}</option>`).join('')}</select>
+                </label>
+                <label style="min-width:120px;display:flex;gap:6px;align-items:center;">Duration
+                    <input class="repMin" type="number" min="0" max="59" value="${minutes}" style="width:60px;"> :
+                    <input class="repSec" type="number" min="0" max="59" value="${seconds}" style="width:60px;">
+                </label>
+                <button type="button" class="repRemoveRowBtn">Remove</button>
+            </div>
+        `;
+            const tpl = document.createElement('div');
+            tpl.innerHTML = html;
+            const rowEl = tpl.firstElementChild;
+            // apply defaults for selects/inputs after insertion if provided
+            if (defaults.genre) rowEl.querySelector('.repGenre').value = defaults.genre;
+            if (defaults.mood) rowEl.querySelector('.repMood').value = defaults.mood;
+            if (defaults.bpm != null) rowEl.querySelector('.repBpm').value = defaults.bpm;
+            container.appendChild(rowEl);
+
+            const remBtn = rowEl.querySelector('.repRemoveRowBtn');
+            remBtn.addEventListener('click', () => rowEl.remove());
+            return rowEl;
+        }
+
+        function clearRows() {
+            container.innerHTML = '';
+        }
+
+        // return true when row is completely blank (no meaningful data)
+        function isRowCompletelyBlank(rowEl) {
+            const title = (rowEl.querySelector('.repTitle').value || '').trim();
+            const artist = (rowEl.querySelector('.repArtist').value || '').trim();
+            const genre = (rowEl.querySelector('.repGenre').value || '').trim();
+            const mood = (rowEl.querySelector('.repMood').value || '').trim();
+            const bpm = (rowEl.querySelector('.repBpm').value || '').trim();
+            const min = parseInt(rowEl.querySelector('.repMin').value || '0', 10) || 0;
+            const sec = parseInt(rowEl.querySelector('.repSec').value || '0', 10) || 0;
+            const total = min * 60 + sec;
+            return !title && !artist && !genre && !mood && !bpm && total === 0;
+        }
+
+        // Adjust rows to target count without wiping existing input values.
+        // - If increasing: append rows.
+        // - If decreasing: only remove trailing completely blank rows; refuse if data would be lost.
+        function adjustRows(targetCount) {
+            const existingRows = Array.from(container.querySelectorAll('.repSongRow'));
+            const current = existingRows.length;
+            if (targetCount === current) return;
+            if (targetCount > current) {
+                const toAdd = targetCount - current;
+                for (let i = 0; i < toAdd; i++) appendSongRow();
+                return;
+            }
+            // targetCount < current: attempt to remove trailing blank rows
+            let neededRemovals = current - targetCount;
+            for (let i = existingRows.length - 1; i >= 0 && neededRemovals > 0; i--) {
+                const r = existingRows[i];
+                if (isRowCompletelyBlank(r)) {
+                    r.remove();
+                    neededRemovals--;
+                } else {
+                    // can't remove non-blank trailing row
+                    break;
+                }
+            }
+            if (neededRemovals > 0) {
+                status.textContent = 'Cannot reduce rows: some trailing rows contain data. Remove them manually first.';
+                // update rowsInput to reflect actual count
+                rowsInput.value = container.querySelectorAll('.repSongRow').length;
+            }
+        }
+
+        makeRowsBtn.addEventListener('click', () => {
+            const n = Math.max(0, parseInt(rowsInput.value, 10) || 0);
+            adjustRows(n);
+        });
+        addRowBtn.addEventListener('click', () => appendSongRow());
+        clearBtn.addEventListener('click', () => clearRows());
+
+        // initialize with a few rows without wiping if user reopens this view repeatedly
+        if (container.querySelectorAll('.repSongRow').length === 0) {
+            adjustRows(Math.max(1, Math.min(50, parseInt(rowsInput.value, 10) || 3)));
+        }
+
+        createBtn.addEventListener('click', async () => {
+            status.textContent = '';
+            const nameEl = $('repName');
+            const name = nameEl ? nameEl.value.trim() : '';
+            if (!name) {
+                status.textContent = 'Enter a name for the repertoire.';
+                return;
+            }
+            const isPublic = $('repPublic').checked;
+
+            // collect song rows
+            const songEls = Array.from(container.querySelectorAll('.repSongRow'));
+            const songs = [];
+            for (let i = 0; i < songEls.length; i++) {
+                const row = songEls[i];
+                const title = (row.querySelector('.repTitle').value || '').trim();
+                const artist = (row.querySelector('.repArtist').value || '').trim();
+                const genre = (row.querySelector('.repGenre').value || '') || null;
+                const mood = (row.querySelector('.repMood').value || '') || null;
+                const bpmRaw = row.querySelector('.repBpm').value;
+                const bpm = bpmRaw === '' ? null : parseInt(bpmRaw, 10);
+                const minutes = parseInt(row.querySelector('.repMin').value || '0', 10) || 0;
+                const seconds = parseInt(row.querySelector('.repSec').value || '0', 10) || 0;
+                const totalSec = minutes * 60 + seconds;
+
+                // skip completely blank rows
+                const completelyBlank = !title && !artist && totalSec === 0 && !genre && !mood && (bpm == null);
+                if (completelyBlank) continue;
+
+                // require duration if some identifying data present
+                const hasId = title || artist;
+                if (hasId && totalSec === 0) {
+                    status.textContent = `Enter a duration for song ${i + 1} or remove the row.`;
+                    return;
+                }
+
+                songs.push({
+                    title: title || null,
+                    artist: artist || null,
+                    genre: genre || null,
+                    bpm: bpm,
+                    mood: mood || null,
+                    durationMinutes: minutes,
+                    durationSeconds: seconds
+                });
+            }
+
+            const payload = {
+                name: name,
+                visibility: isPublic ? 'PUBLIC' : 'PRIVATE',
+                songs: songs
+            };
+
+            status.textContent = 'Creating...';
+
+            async function doPost() {
+                return await fetchJson('/api/repertoires', {
+                    method: 'POST',
+                    body: payload
+                });
+            }
+
+            try {
+                await doPost();
+                status.textContent = 'Repertoire created.';
+                try { loadMyRepertoires(); } catch (e) {}
+                showAuthView();
+            } catch (e) {
+                const msg = String(e && e.message ? e.message : e);
+                if (/HTTP\s*403/.test(msg)) {
+                    // Do not perform an automatic GET/refresh (that previously triggered logout/redirect behavior).
+                    // Instead inform the user and keep them in the auth view so they can refresh or re-login manually.
+                    status.textContent = 'Forbidden — CSRF token missing or expired. Refresh the page or re-login and try again.';
+                    return;
+                }
+                const out = msg.length > 200 ? msg.slice(0, 200) + '…' : msg;
+                status.textContent = out;
+            }
+        });
     }
 
     function createSetlistFlow() {
@@ -604,8 +809,39 @@
 
     // ---------- Init ----------
     function init() {
+        // Install last-resort defensive guard FIRST so it always captures native submits (Enter, etc.)
+        try {
+            const lf = document.getElementById('loginForm');
+            if (lf && !lf.dataset.nativeGuard) {
+                try { lf.action = '#'; } catch (e) {}
+                // capture=true so this runs before other submit listeners and prevents native navigation
+                lf.addEventListener('submit', (e) => { e.preventDefault(); e.stopImmediatePropagation(); }, { capture: true, passive: false });
+                lf.dataset.nativeGuard = '1';
+            }
+            // Also install a global capturing submit listener as a backup (covers forms added later)
+            if (!document.documentElement.dataset.loginGlobalGuard) {
+                document.addEventListener('submit', (ev) => {
+                    const form = ev.target;
+                    if (!(form instanceof HTMLFormElement)) return;
+                    // very small heuristic: block submits from forms that look like credential forms
+                    try {
+                        const hasUser = form.querySelector('#username, [name="username"], [name="name"], input[type="text"]');
+                        const hasPass = form.querySelector('#password, [name="password"], input[type="password"]');
+                        if (hasUser && hasPass) {
+                            ev.preventDefault();
+                            ev.stopImmediatePropagation();
+                        }
+                    } catch (ex) { /* ignore */ }
+                }, { capture: true, passive: false });
+                document.documentElement.dataset.loginGlobalGuard = '1';
+            }
+        } catch (e) { /* ignore */ }
+
+        // Now the app controls (they may add submit handlers but the guard runs first)
         attachPublicControls();
         attachAuthControls();
+        updateAdminVisibility(); // <-- ensure correct visibility on initial load
+
         if (sessionStorage.getItem('authOk')) {
             showAuthView();
         } else {

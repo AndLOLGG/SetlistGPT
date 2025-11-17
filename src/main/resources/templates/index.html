@@ -1,6 +1,85 @@
 <!DOCTYPE html>
 <html xmlns:th="http://www.thymeleaf.org" lang="en">
 <head>
+    <script>
+        (function () {
+            'use strict';
+
+            // record last user interaction (helpful to correlate with navigation)
+            const last = { ev: null, stack: null, t: 0 };
+            ['click', 'keydown', 'submit'].forEach(evt =>
+                document.addEventListener(evt, (e) => {
+                    try {
+                        last.ev = { type: e.type, target: (e.target && (e.target.id || e.target.tagName)) || String(e.target) };
+                        last.stack = (new Error()).stack;
+                        last.t = Date.now();
+                    } catch (ex) { /* ignore */ }
+                }, { capture: true, passive: true })
+            );
+
+            function pathOf(u) {
+                try { return new URL(u, location.href).pathname; } catch (e) { return ''; }
+            }
+
+            function logAndBlock(u, via) {
+                try {
+                    console.warn('[NAV-TRACE] blocked navigation to', u, 'via', via, { last });
+                    console.warn('[NAV-TRACE] current stack:', (new Error()).stack);
+                    // break into debugger so you can inspect callers
+                    debugger;
+                } catch (e) { /* ignore */ }
+            }
+
+            // patch common programmatic navigation points
+            try {
+                const _assign = window.location.assign.bind(window.location);
+                window.location.assign = function (u) {
+                    if (pathOf(u) === '/api/login') { logAndBlock(u, 'location.assign'); return; }
+                    return _assign(u);
+                };
+            } catch (e) { /* ignore */ }
+
+            try {
+                const _replace = window.location.replace.bind(window.location);
+                window.location.replace = function (u) {
+                    if (pathOf(u) === '/api/login') { logAndBlock(u, 'location.replace'); return; }
+                    return _replace(u);
+                };
+            } catch (e) { /* ignore */ }
+
+            try {
+                const _push = history.pushState.bind(history);
+                history.pushState = function (state, title, url) {
+                    if (pathOf(url) === '/api/login') { logAndBlock(url, 'history.pushState'); return; }
+                    return _push(state, title, url);
+                };
+            } catch (e) { /* ignore */ }
+
+            try {
+                const _open = window.open.bind(window);
+                window.open = function (url, ...rest) {
+                    if (pathOf(url) === '/api/login') { logAndBlock(url, 'window.open'); return null; }
+                    return _open(url, ...rest);
+                };
+            } catch (e) { /* ignore */ }
+
+            // helpful additional logging: capture anchor clicks (should already be captured by your guard)
+            document.addEventListener('click', (e) => {
+                try {
+                    const a = e.target.closest && e.target.closest('a[href]');
+                    if (!a) return;
+                    const p = pathOf(a.getAttribute('href') || '');
+                    if (p === '/api/login') {
+                        console.warn('[NAV-TRACE] anchor click to /api/login blocked', { anchor: a, last });
+                        e.preventDefault();
+                        e.stopPropagation();
+                        debugger;
+                    }
+                } catch (ex) { /* ignore */ }
+            }, { capture: true, passive: false });
+
+        })();
+    </script>
     <meta charset="utf-8" />
     <title>SetlistGPT</title>
     <meta name="viewport" content="width=device-width,initial-scale=1" />
@@ -34,9 +113,10 @@
     </div>
 
     <div id="loginArea" class="hidden">
-        <form id="loginForm" action="#" method="post" onsubmit="return false;">
-            <label>Username <input id="username" type="text" autocomplete="username"></label>
-            <label>Password <input id="password" type="password" autocomplete="current-password"></label>
+    <!-- Neutralize native navigation: action="#" prevents the browser from navigating -->
+        <form id="loginForm" action="#" method="post" onsubmit="event.preventDefault();">
+            <label>Username <input id="username" name="name" type="text" autocomplete="username"></label>
+            <label>Password <input id="password" name="password" type="password" autocomplete="current-password"></label>
             <button id="loginBtn" type="button">Sign in</button>
             <span class="meta" aria-live="polite"></span>
         </form>
