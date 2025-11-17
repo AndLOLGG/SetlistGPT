@@ -1,12 +1,22 @@
 package dk.ek.setlistgpt.repertoire;
 
+import dk.ek.setlistgpt.profile.Profile;
 import dk.ek.setlistgpt.song.Song;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpSession;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
 
+/**
+ * RepertoireController: list endpoint now returns:
+ * - if HTTP session contains a 'profile' -> repertoires owned by that profile (My Repertoires)
+ * - otherwise -> only PUBLIC repertoires (public browser)
+ *
+ * Mutating endpoints remain protected by security.
+ */
 @RestController
 @RequestMapping("/api/repertoires")
 public class RepertoireController {
@@ -25,10 +35,22 @@ public class RepertoireController {
         return repo.findByVisibility(RepertoireVisibility.PUBLIC);
     }
 
-    // List ALL repertoires (temporary: no profile scoping yet)
+    // List repertoires: if session has profile -> return owner's repertoires; otherwise return PUBLIC repertoires.
     @GetMapping
-    public List<Repertoire> listAll() {
-        return repo.findAll();
+    public List<Repertoire> listAll(HttpServletRequest request) {
+        HttpSession session = request.getSession(false);
+        if (session != null) {
+            Object obj = session.getAttribute("profile");
+            if (obj instanceof Profile) {
+                Profile p = (Profile) obj;
+                if (p.getId() != null) {
+                    // return only the owner's repertoires (keeps PRIVATE data private)
+                    return repo.findByOwnerId(p.getId());
+                }
+            }
+        }
+        // fallback: public listing
+        return repo.findByVisibility(RepertoireVisibility.PUBLIC);
     }
 
     // Create a new repertoire (temporary: not scoped to user; secure later)
@@ -55,7 +77,6 @@ public class RepertoireController {
                 .orElseGet(() -> ResponseEntity.notFound().build());
     }
 
-    // List songs for a repertoire
     @GetMapping("/{id}/songs")
     public ResponseEntity<List<Song>> getSongs(@PathVariable Long id) {
         return repo.findById(id)
@@ -63,7 +84,6 @@ public class RepertoireController {
                 .orElseGet(() -> ResponseEntity.notFound().build());
     }
 
-    // Change visibility (secure later)
     @PutMapping("/{id}/visibility")
     public ResponseEntity<Repertoire> updateVisibility(
             @PathVariable Long id,
@@ -76,7 +96,6 @@ public class RepertoireController {
                 .orElseGet(() -> ResponseEntity.notFound().build());
     }
 
-    // Link existing song
     @PostMapping("/{repertoireId}/songs/{songId}")
     public ResponseEntity<Song> addSongToRepertoire(@PathVariable Long repertoireId, @PathVariable Long songId) {
         try {
@@ -88,7 +107,6 @@ public class RepertoireController {
         }
     }
 
-    // Unlink song
     @DeleteMapping("/{repertoireId}/songs/{songId}")
     public ResponseEntity<Void> removeSongFromRepertoire(@PathVariable Long repertoireId, @PathVariable Long songId) {
         boolean removed = repertoireService.removeSongFromRepertoire(repertoireId, songId);

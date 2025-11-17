@@ -2,11 +2,15 @@ package dk.ek.setlistgpt.security;
 
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.http.HttpMethod;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.csrf.CookieCsrfTokenRepository;
 import org.springframework.security.web.csrf.CsrfFilter;
+import org.springframework.security.web.context.SecurityContextPersistenceFilter;
+
+import org.springframework.security.web.authentication.AnonymousAuthenticationFilter;
 import org.springframework.security.web.util.matcher.RequestMatcher;
 
 import jakarta.servlet.http.HttpServletRequest;
@@ -24,23 +28,16 @@ public class SecurityConfig {
 
     @Bean
     public SecurityFilterChain securityFilterChain(HttpSecurity http, CookieCsrfTokenRepository csrfRepo) throws Exception {
-        // RequestMatcher to exempt the JSON login POST from CSRF checks
         RequestMatcher loginPostMatcher = (HttpServletRequest req) ->
                 "/api/login".equals(req.getServletPath()) && "POST".equalsIgnoreCase(req.getMethod());
 
-        // Temporary: ignore POST /api/repertoires to unblock while debugging (remove ASAP)
-        RequestMatcher repertoiresPostMatcher = (HttpServletRequest req) ->
-                "/api/repertoires".equals(req.getServletPath()) && "POST".equalsIgnoreCase(req.getMethod());
-
-        // Exempt logout POST from CSRF checks to avoid 403 during logout while debugging.
-        // Remove this exemption in production and fix the underlying CSRF/session mismatch instead.
         RequestMatcher logoutPostMatcher = (HttpServletRequest req) ->
                 "/logout".equals(req.getServletPath()) && "POST".equalsIgnoreCase(req.getMethod());
 
         http
                 .csrf(csrf -> csrf
                         .csrfTokenRepository(csrfRepo)
-                        .ignoringRequestMatchers(loginPostMatcher, repertoiresPostMatcher, logoutPostMatcher)
+                        .ignoringRequestMatchers(loginPostMatcher, logoutPostMatcher)
                 )
                 .formLogin(form -> form.disable())
                 .authorizeHttpRequests(auth -> auth
@@ -54,6 +51,9 @@ public class SecurityConfig {
                                 "/api/login",
                                 "/api/csrf"
                         ).permitAll()
+                        // Allow public GET access to the repertoire listing/details used by the SPA.
+                        .requestMatchers(HttpMethod.GET, "/api/repertoires", "/api/repertoires/**").permitAll()
+                        // Protect all other API operations
                         .requestMatchers("/api/**").authenticated()
                         .anyRequest().permitAll()
                 )
@@ -63,10 +63,13 @@ public class SecurityConfig {
                         .permitAll()
                 );
 
-        // add debug filter before CSRF filter so it can inspect cookie/header before validation
+        // Ensure the session->SecurityContext filter runs AFTER persistence filter
+        http.addFilterAfter(new SessionProfileAuthFilter(), SecurityContextPersistenceFilter.class);
+
+        // Debug/inspection filter kept before CSRF filter
         http.addFilterBefore(new CsrfDebugFilter(csrfRepo), CsrfFilter.class);
 
-        // keep the cookie write helper
+        // Ensure CSRF cookie is written on GET responses
         http.addFilterAfter(new WriteCsrfCookieFilter(), CsrfFilter.class);
 
         return http.build();

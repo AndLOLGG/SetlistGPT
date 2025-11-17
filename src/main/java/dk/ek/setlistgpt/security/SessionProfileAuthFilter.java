@@ -1,19 +1,26 @@
 package dk.ek.setlistgpt.security;
 
 import dk.ek.setlistgpt.profile.Profile;
-import dk.ek.setlistgpt.profile.ProfileType;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.authentication.AnonymousAuthenticationToken;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
+import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
 import java.util.List;
+import java.util.Objects;
 
+/**
+ * Restores authentication from the HTTP session attribute "profile".
+ * Replaces anonymous or stale authentication so security checks and CSRF
+ * use the restored principal.
+ */
 public class SessionProfileAuthFilter extends OncePerRequestFilter {
 
     @Override
@@ -22,9 +29,33 @@ public class SessionProfileAuthFilter extends OncePerRequestFilter {
                                     FilterChain chain)
             throws ServletException, IOException {
 
-        if (SecurityContextHolder.getContext().getAuthentication() == null) {
-            Profile p = sessionProfile(request);
-            if (p != null) {
+        Authentication existing = SecurityContextHolder.getContext().getAuthentication();
+        Profile p = sessionProfile(request);
+
+        if (p != null) {
+            boolean shouldSet = false;
+
+            if (existing == null) {
+                shouldSet = true;
+            } else if (existing instanceof AnonymousAuthenticationToken) {
+                shouldSet = true;
+            } else {
+                // If existing principal is not the same profile instance/id, replace it.
+                Object principal = existing.getPrincipal();
+                if (!(principal instanceof Profile)) {
+                    shouldSet = true;
+                } else {
+                    Profile current = (Profile) principal;
+                    // compare by id if available, fallback to name
+                    if (current.getId() == null || p.getId() == null) {
+                        if (!Objects.equals(current.getName(), p.getName())) shouldSet = true;
+                    } else if (!Objects.equals(current.getId(), p.getId())) {
+                        shouldSet = true;
+                    }
+                }
+            }
+
+            if (shouldSet) {
                 String role = "ROLE_" + p.getType().name();
                 UsernamePasswordAuthenticationToken auth =
                         new UsernamePasswordAuthenticationToken(p, null,
@@ -32,6 +63,7 @@ public class SessionProfileAuthFilter extends OncePerRequestFilter {
                 SecurityContextHolder.getContext().setAuthentication(auth);
             }
         }
+
         chain.doFilter(request, response);
     }
 
@@ -44,7 +76,6 @@ public class SessionProfileAuthFilter extends OncePerRequestFilter {
 
     @Override
     protected boolean shouldNotFilter(HttpServletRequest request) {
-        // Allow all; adjust if you need skips.
         return false;
     }
 }
