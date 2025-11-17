@@ -8,7 +8,9 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.Comparator;
 import java.util.List;
+import java.util.stream.Collectors;
 
 /**
  * RepertoireController: list endpoint now returns:
@@ -29,10 +31,24 @@ public class RepertoireController {
         this.repertoireService = repertoireService;
     }
 
-    // Public endpoint: list PUBLIC repertoires
+    // Helper: sort by owner name, then repertoire name, then song count (desc)
+    private List<Repertoire> sortPublicList(List<Repertoire> list) {
+        return list.stream()
+                .sorted(Comparator
+                        .comparing((Repertoire r) -> {
+                            String on = (r.getOwner() != null && r.getOwner().getName() != null) ? r.getOwner().getName().toLowerCase() : "";
+                            return on;
+                        })
+                        .thenComparing(r -> (r.getName() != null ? r.getName().toLowerCase() : ""))
+                        .thenComparing(Comparator.comparingInt((Repertoire r) -> (r.getSongs() != null ? r.getSongs().size() : 0)).reversed())
+                ).collect(Collectors.toList());
+    }
+
+    // Public endpoint: list PUBLIC repertoires (sorted, fetch owner & songs via repository)
     @GetMapping("/public")
     public List<Repertoire> listPublic() {
-        return repo.findByVisibility(RepertoireVisibility.PUBLIC);
+        List<Repertoire> reps = repo.findByVisibility(RepertoireVisibility.PUBLIC);
+        return sortPublicList(reps);
     }
 
     // List repertoires: if session has profile -> return owner's repertoires; otherwise return PUBLIC repertoires.
@@ -45,26 +61,58 @@ public class RepertoireController {
                 Profile p = (Profile) obj;
                 if (p.getId() != null) {
                     // return only the owner's repertoires (keeps PRIVATE data private)
-                    return repo.findByOwnerId(p.getId());
+                    List<Repertoire> owned = repo.findByOwnerId(p.getId());
+                    // sort owner's list by name then song-count desc
+                    return owned.stream()
+                            .sorted(Comparator
+                                    .comparing((Repertoire r) -> (r.getName() != null ? r.getName().toLowerCase() : ""))
+                                    .thenComparing(Comparator.comparingInt((Repertoire r) -> (r.getSongs() != null ? r.getSongs().size() : 0)).reversed())
+                            ).collect(Collectors.toList());
                 }
             }
         }
         // fallback: public listing
-        return repo.findByVisibility(RepertoireVisibility.PUBLIC);
+        List<Repertoire> reps = repo.findByVisibility(RepertoireVisibility.PUBLIC);
+        return sortPublicList(reps);
     }
 
-    // Create a new repertoire (temporary: not scoped to user; secure later)
+    // Create a new repertoire: attach owner (if session) and attach incoming songs to the new repertoire.
     @PostMapping
-    public ResponseEntity<Repertoire> create(@RequestBody Repertoire body) {
+    public ResponseEntity<Repertoire> create(@RequestBody Repertoire body, HttpServletRequest request) {
         if (body == null || body.getName() == null || body.getName().trim().isEmpty()) {
             return ResponseEntity.badRequest().build();
         }
         Repertoire r = new Repertoire();
         r.setName(body.getName().trim());
-        // default PRIVATE unless explicitly PUBLIC
         r.setVisibility(body.getVisibility() == RepertoireVisibility.PUBLIC
                 ? RepertoireVisibility.PUBLIC
                 : RepertoireVisibility.PRIVATE);
+
+        // attach owner from session if present
+        HttpSession session = request.getSession(false);
+        if (session != null) {
+            Object obj = session.getAttribute("profile");
+            if (obj instanceof Profile) {
+                r.setOwner((Profile) obj);
+            }
+        }
+
+        // Attach incoming songs properly so each Song.repertoire is set
+        if (body.getSongs() != null && !body.getSongs().isEmpty()) {
+            for (Song incoming : body.getSongs()) {
+                if (incoming == null) continue;
+                Song s = new Song();
+                s.setTitle(incoming.getTitle());
+                s.setArtist(incoming.getArtist());
+                s.setGenre(incoming.getGenre());
+                s.setBpm(incoming.getBpm());
+                s.setMood(incoming.getMood());
+                s.setDurationMinutes(incoming.getDurationMinutes());
+                s.setDurationSeconds(incoming.getDurationSeconds());
+                r.addSong(s);
+            }
+        }
+
         Repertoire saved = repo.save(r);
         return ResponseEntity.status(HttpStatus.CREATED).body(saved);
     }

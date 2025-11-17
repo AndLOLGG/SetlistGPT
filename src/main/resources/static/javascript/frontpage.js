@@ -136,7 +136,8 @@ console.log('frontpage.js loaded');
         const rows = list.map(r => {
             const id = escapeHtml(r.id);
             const title = escapeHtml(r.title || '(untitled)');
-            return `<li data-id="${id}" ${clickableIds ? 'class="clickable"' : ''}>${title}</li>`;
+            // When clickableIds is true, make the <li> focusable and expose role="button" for screen readers.
+            return `<li data-id="${id}" ${clickableIds ? 'class="clickable" tabindex="0" role="button"' : ''}>${title}</li>`;
         });
         return `<ul>${rows.join('')}</ul>`;
     }
@@ -154,11 +155,20 @@ console.log('frontpage.js loaded');
     }
     function renderSongListNumbered(songs) {
         if (!Array.isArray(songs) || songs.length === 0) return '<p>No songs.</p>';
-        const items = songs.map((s,i) => {
+        const items = songs.map((s, i) => {
             const title = escapeHtml(s.title || s.artist || '(untitled)');
             const artist = escapeHtml(s.artist || '');
             const dur = fmtDuration(s.durationInSeconds || (s.durationMinutes*60 + s.durationSeconds) || 0);
-            return `<li>${i+1}. ${title}${artist? ' - ' + artist : ''} <span class="meta">${dur}</span></li>`;
+
+            // build metadata (genre, bpm, mood)
+            const metaParts = [];
+            if (s.genre) metaParts.push(escapeHtml(s.genre));
+            if (s.bpm != null && s.bpm !== '') metaParts.push(escapeHtml(String(s.bpm)) + ' bpm');
+            if (s.mood) metaParts.push(escapeHtml(s.mood));
+            const metaText = metaParts.length ? ` <span class="meta">(${metaParts.join(', ')})</span>` : '';
+
+            // rely on <ol> numbering - don't prefix with i+1
+            return `<li>${title}${artist ? ' - ' + artist : ''}${metaText} <span class="meta">${dur}</span></li>`;
         });
         return `<ol>${items.join('')}</ol>`;
     }
@@ -283,8 +293,14 @@ console.log('frontpage.js loaded');
                 if (status) status.textContent = '';
                 enforceLeftAlignment();
                 try {
-                    const data = await fetchJson('/api/repertoires'); // assumes endpoint exists
-                    results.innerHTML = '<h3>Public Repertoires</h3>' + renderRepertoireList(data);
+                    // explicitly call the public endpoint and make items clickable
+                    const data = await fetchJson('/api/repertoires/public');
+                    results.innerHTML = '<h3>Public Repertoires</h3>' + renderRepertoireList(data, { clickableIds: true });
+
+                    // attach click handlers to show repertoire details (public)
+                    results.querySelectorAll('li.clickable').forEach(li => {
+                        li.addEventListener('click', () => showPublicRepertoireDetails(li.dataset.id));
+                    });
                 } catch (e) {
                     results.innerHTML = '<p>Error loading repertoires.</p>';
                 }

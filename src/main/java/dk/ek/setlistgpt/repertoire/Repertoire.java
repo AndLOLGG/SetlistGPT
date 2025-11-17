@@ -1,10 +1,11 @@
+// java
 package dk.ek.setlistgpt.repertoire;
 
 import com.fasterxml.jackson.annotation.JsonBackReference;
+import com.fasterxml.jackson.annotation.JsonManagedReference;
+import com.fasterxml.jackson.annotation.JsonProperty;
 import dk.ek.setlistgpt.profile.Profile;
 import dk.ek.setlistgpt.song.Song;
-
-import com.fasterxml.jackson.annotation.JsonManagedReference;
 import jakarta.persistence.*;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
@@ -49,5 +50,11 @@ public class Repertoire {
     public void removeSong(Song song) {
         songs.remove(song);
         song.setRepertoire(null);
+    }
+
+    // Provide a `title` JSON property expected by the frontend (maps to `name`).
+    @JsonProperty("title")
+    public String getTitle() {
+        return this.name;
     }
 }

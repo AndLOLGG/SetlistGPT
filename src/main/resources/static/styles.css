@@ -216,3 +216,28 @@ a.button-link:hover {
     margin-top: 8px;
     clear: both;
 }
+
+li.clickable {
+    cursor: pointer;
+    padding: 6px 8px;
+    border-radius: 6px;
+    transition: background-color .12s ease, box-shadow .12s ease;
+    /* keep list marker but align nicely */
+    display: list-item;
+}
+
+li.clickable:hover {
+    background-color: #f4f9ff;
+    text-decoration: none;
+}
+
+li.clickable:focus {
+    outline: none;
+    box-shadow: 0 0 0 4px rgba(21,156,228,0.14);
+    background-color: #e8f3ff;
+}
+
+/* optional: slightly bolder text so items read like actionable rows */
+li.clickable > strong, li.clickable {
+    font-weight: 600;
+}

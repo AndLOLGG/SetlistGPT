@@ -51,6 +51,8 @@ public class SecurityConfig {
                                 "/api/login",
                                 "/api/csrf"
                         ).permitAll()
+                        // Allow public POST to create profiles (signup)
+                        .requestMatchers(HttpMethod.POST, "/api/profile/signup").permitAll()
                         // Allow public GET access to the repertoire listing/details used by the SPA.
                         .requestMatchers(HttpMethod.GET, "/api/repertoires", "/api/repertoires/**").permitAll()
                         // Protect all other API operations

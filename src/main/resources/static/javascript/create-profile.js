@@ -17,7 +17,8 @@
         }
         const xsrf = getCookie('XSRF-TOKEN');
         if (xsrf) headers['X-XSRF-TOKEN'] = xsrf;
-        const res = await fetch(url, { credentials: 'same-origin', ...opts, headers, body });
+        // use include so cookies are sent and received consistently
+        const res = await fetch(url, { credentials: 'include', ...opts, headers, body });
         const ct = res.headers.get('content-type') || '';
         const isJson = ct.includes('application/json');
         if (!res.ok) {
@@ -55,9 +56,8 @@
     }
 
     async function doRegister(name, password, type) {
-        // Adjust to your backend endpoint. If not present, an error is shown.
-        // Expected payload: { name, password, type }
-        return fetchJson('/api/profile/register', {
+        // call the server signup endpoint
+        return fetchJson('/api/profile/signup', {
             method: 'POST',
             body: { name, password, type }
         });
@@ -100,14 +100,13 @@
                     if (status) status.textContent = 'Signing in...';
                     const authed = await doLogin(name, password);
 
-                    // Mirror frontpage.js behavior
                     sessionStorage.setItem('authOk', 'true');
+                    try { sessionStorage.setItem('profile', JSON.stringify(authed)); } catch (e) {}
                     if (authed && authed.type === 'ADMIN') {
                         window.location.href = '/admin';
                         return;
                     }
                     if (status) status.textContent = 'Profile created. You are signed in.';
-                    // Switch to auth view if frontpage helpers exist
                     if (window.SetlistGPT && typeof window.SetlistGPT.showAuthView === 'function') {
                         window.SetlistGPT.showAuthView();
                     }
@@ -115,6 +114,8 @@
                     const msg = String(e.message || e);
                     if (/HTTP 404/i.test(msg)) {
                         if (status) status.textContent = 'Registration endpoint not available.';
+                    } else if (/HTTP 409/i.test(msg)) {
+                        if (status) status.textContent = 'Username already exists.';
                     } else {
                         if (status) status.textContent = `Failed: ${msg}`;
                     }
@@ -127,4 +128,13 @@
     window.CreateProfile = Object.assign(window.CreateProfile || {}, {
         showCreateProfile
     });
+
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', () => {
+            // If the SPA navigates to /profile it may call this
+            try { if (location.pathname && location.pathname.startsWith('/profile')) showCreateProfile(); } catch (e) {}
+        });
+    } else {
+        try { if (location.pathname && location.pathname.startsWith('/profile')) showCreateProfile(); } catch (e) {}
+    }
 })();
