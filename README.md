@@ -83,5 +83,27 @@ For questions or suggestions, please open an issue on GitHub.
 ```
 SetlistGPT/
 ├── README.md
-└── TECHSTACK.md
+├── pom.xml
+├── src/
+│   ├── main/
+│   │   ├── java/
+│   │   │   └── dk/ek/setlistgpt/
+│   │   │       ├── admin/                 # admin DTOs/controllers
+│   │   │       ├── profile/               # Profile entity, controller, service, repo
+│   │   │       ├── repertoire/             # Repertoire entity, visibility enum, repository
+│   │   │       ├── song/                   # Song entity, repositories
+│   │   │       └── (other packages/controllers/services)
+│   │   └── resources/
+│   │       ├── static/
+│   │       │   ├── javascript/
+│   │       │   │   ├── frontpage.js
+│   │       │   │   ├── create-profile.js
+│   │       │   │   └── login-hotfix.js
+│   │       │   └── styles.css
+│   │       └── templates/
+│   │           └── index.html
+│   └── test/
+│       └── java/                           # unit/integration tests
+└── (other files: .github/, .env.example, etc.)
+
 ```
