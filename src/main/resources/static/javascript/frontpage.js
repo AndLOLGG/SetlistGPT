@@ -1,4 +1,3 @@
-// javascript
 /**
  * frontpage.js
  * - DOM helpers
@@ -173,6 +172,99 @@ console.log('frontpage.js loaded');
         return `<ol>${items.join('')}</ol>`;
     }
 
+    // ---------- Public helpers: owner grouping UI ----------
+    // helper: normalize owner info from a repertoire object
+    function normalizeOwner(rep) {
+        if (!rep) return { ownerId: null, ownerName: 'Unknown' };
+
+        // Try multiple common field names and shapes.
+        const ownerObj = rep.owner || rep.ownerInfo || rep.ownerDetail || rep.owner_summary || null;
+        let ownerId = null;
+        let ownerName = null;
+
+        if (ownerObj && typeof ownerObj === 'object') {
+            ownerId = ownerObj.id ?? ownerObj.ownerId ?? ownerObj.owner_id ?? ownerObj.profileId ?? ownerObj.id_ ?? null;
+            ownerName = ownerObj.name ?? ownerObj.username ?? ownerObj.displayName ?? ownerObj.fullName ?? ownerObj.profileName ?? null;
+        } else if (ownerObj != null) {
+            // owner may be a primitive id or a username string
+            if (typeof ownerObj === 'number' || (/^\d+$/.test(String(ownerObj)))) {
+                ownerId = ownerObj;
+            } else {
+                ownerName = String(ownerObj);
+            }
+        }
+
+        // try top-level fallbacks
+        ownerId = ownerId ?? rep.ownerId ?? rep.owner_id ?? rep.owner ?? rep.ownerIdString ?? null;
+        ownerName = ownerName ?? rep.ownerName ?? rep.owner_name ?? rep.ownerDisplay ?? rep.ownerDisplayName ?? rep.ownerTitle ?? null;
+
+        // final fallbacks: if we have an id but no friendly name, show "Owner #id" so items don't cluster into "Unknown"
+        if ((ownerName == null || ownerName === '') && ownerId != null) {
+            ownerName = `Owner #${String(ownerId)}`;
+        }
+
+        if (ownerName == null || ownerName === '') ownerName = 'Unknown';
+        // ensure ownerId is a string key (use ownerName when id missing)
+        const key = ownerId == null ? String(ownerName) : String(ownerId);
+        return { ownerId: key, ownerName: String(ownerName) };
+    }
+
+    // Render owners list HTML
+    function renderOwnersList(ownerMap) {
+        const owners = Array.from(ownerMap.values());
+        if (owners.length === 0) return '<p>No public repertoires.</p>';
+        const rows = owners.map(o => {
+            const id = escapeHtml(o.ownerId);
+            const name = escapeHtml(o.ownerName);
+            const count = o.reps.length;
+            return `<li data-owner-id="${id}" class="owner-clickable clickable" tabindex="0" role="button">${name} <span class="meta">(${count} repertoires)</span></li>`;
+        });
+        return `<h3>Public Repertoires by Owner (${owners.length})</h3><ul>${rows.join('')}</ul>`;
+    }
+
+    // Show repertoires for a single owner (rep objects provided)
+    async function showOwnerRepertoires(ownerId, ownerName, repsForOwner) {
+        const results = $('publicResults');
+        const status = $('publicStatus');
+        if (!results) return;
+        status.textContent = `Loading repertoires for ${ownerName}...`;
+        try {
+            // Ensure each repertoire has a songs array (fetch on demand)
+            const fetchPromises = repsForOwner.map(async (rep) => {
+                if (Array.isArray(rep.songs)) return rep;
+                try {
+                    const full = await fetchJson('/api/repertoires/' + encodeURIComponent(rep.id));
+                    rep.songs = Array.isArray(full.songs) ? full.songs : (full.songs || []);
+                } catch (e) {
+                    // if fetch fails, leave songs as empty array
+                    rep.songs = [];
+                }
+                return rep;
+            });
+            await Promise.all(fetchPromises);
+
+            // render repertorie list with song counts
+            const rows = repsForOwner.map(r => {
+                const id = escapeHtml(r.id);
+                const title = escapeHtml(r.title || '(untitled)');
+                const songCount = Array.isArray(r.songs) ? r.songs.length : (r.songCount ?? 0);
+                return `<li data-id="${id}" class="clickable rep-clickable" tabindex="0" role="button">${title} <span class="meta">(${songCount} songs)</span></li>`;
+            });
+
+            results.innerHTML = `<h3>${escapeHtml(ownerName)} — ${repsForOwner.length} repertoires</h3><ul>${rows.join('')}</ul>`;
+
+            // attach click handlers to repertoires
+            results.querySelectorAll('.rep-clickable').forEach(li => {
+                li.addEventListener('click', () => showPublicRepertoireDetails(li.dataset.id));
+            });
+            status.textContent = '';
+        } catch (e) {
+            console.error(e);
+            status.textContent = 'Error loading repertoires.';
+            results.innerHTML = '<p>Failed to load repertoires.</p>';
+        }
+    }
+
     // ---------- Public handlers ----------
     function attachPublicControls() {
         const showLoginBtn = $('showLoginBtn');
@@ -303,15 +395,44 @@ console.log('frontpage.js loaded');
                 if (status) status.textContent = '';
                 enforceLeftAlignment();
                 try {
-                    // explicitly call the public endpoint and make items clickable
+                    // fetch public repertoires (API shape may vary)
                     const data = await fetchJson('/api/repertoires/public');
-                    results.innerHTML = '<h3>Public Repertoires</h3>' + renderRepertoireList(data, { clickableIds: true });
+                    // data may be an array or wrapped object; normalize to array
+                    const list = Array.isArray(data) ? data : (data.repertoires || data.items || []);
+                    // Debug: log shape so backend payload can be inspected
+                    console.debug('public repertoires payload sample', Array.isArray(list) ? list.slice(0, 8) : list);
 
-                    // attach click handlers to show repertoire details (public)
-                    results.querySelectorAll('li.clickable').forEach(li => {
-                        li.addEventListener('click', () => showPublicRepertoireDetails(li.dataset.id));
+                    // group by owner
+                    const ownerMap = new Map();
+                    for (const r of list) {
+                        const n = normalizeOwner(r);
+                        const key = n.ownerId ?? n.ownerName;
+                        if (!ownerMap.has(key)) {
+                            ownerMap.set(key, { ownerId: n.ownerId, ownerName: n.ownerName, reps: [] });
+                        }
+                        ownerMap.get(key).reps.push(r);
+                    }
+
+                    // If everything grouped under 'Unknown', dump a console warning with a sample to aid debugging
+                    const ownersArr = Array.from(ownerMap.values());
+                    if (ownersArr.length === 1 && ownersArr[0].ownerName === 'Unknown') {
+                        console.warn('All public repertoires grouped as Unknown — inspect payload sample above and adjust backend to include owner name.', list.slice(0,8));
+                    }
+
+                    results.innerHTML = renderOwnersList(ownerMap);
+
+                    // attach click handlers to owners
+                    results.querySelectorAll('li.owner-clickable').forEach(li => {
+                        li.addEventListener('click', () => {
+                            const key = li.dataset.ownerId;
+                            const owner = Array.from(ownerMap.values()).find(o => String(o.ownerId) === String(key) || String(o.ownerName) === String(key));
+                            if (!owner) return;
+                            showOwnerRepertoires(owner.ownerId, owner.ownerName, owner.reps);
+                        });
                     });
+
                 } catch (e) {
+                    console.error(e);
                     results.innerHTML = '<p>Error loading repertoires.</p>';
                 }
             });

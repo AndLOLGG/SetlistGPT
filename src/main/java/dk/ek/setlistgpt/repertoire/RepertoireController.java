@@ -77,6 +77,7 @@ public class RepertoireController {
     }
 
     // Create a new repertoire: attach owner (if session) and attach incoming songs to the new repertoire.
+
     @PostMapping
     public ResponseEntity<Repertoire> create(@RequestBody Repertoire body, HttpServletRequest request) {
         if (body == null || body.getName() == null || body.getName().trim().isEmpty()) {
@@ -93,7 +94,10 @@ public class RepertoireController {
         if (session != null) {
             Object obj = session.getAttribute("profile");
             if (obj instanceof Profile) {
-                r.setOwner((Profile) obj);
+                Profile prof = (Profile) obj;
+                r.setOwner(prof);
+                // ensure denormalized ownerName is populated from Profile.name (username)
+                r.setOwnerName(prof.getName());
             }
         }
 
