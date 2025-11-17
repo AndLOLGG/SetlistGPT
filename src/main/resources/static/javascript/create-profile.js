@@ -1,87 +1,130 @@
 (function () {
-    console.log('create-profile.js loaded'); // visibility to confirm script is active
+    'use strict';
+
+    const $ = (id) => document.getElementById(id);
 
     function getCookie(name) {
         const m = document.cookie.match('(?:^|; )' + name.replace(/([$?*|{}\]\\^])/g, '\\$1') + '=([^;]*)');
         return m ? decodeURIComponent(m[1]) : null;
     }
 
-    function attachSignupHandler() {
-        const form = document.getElementById('signupForm');
-        const status = document.getElementById('status');
-        const btn = form ? document.getElementById('createProfileBtn') : null;
+    async function fetchJson(url, opts = {}) {
+        const headers = Object.assign({ Accept: 'application/json' }, opts.headers || {});
+        let body = opts.body;
+        if (body && typeof body === 'object' && !(body instanceof FormData)) {
+            headers['Content-Type'] = headers['Content-Type'] || 'application/json; charset=UTF-8';
+            body = JSON.stringify(body);
+        }
+        const xsrf = getCookie('XSRF-TOKEN');
+        if (xsrf) headers['X-XSRF-TOKEN'] = xsrf;
+        const res = await fetch(url, { credentials: 'same-origin', ...opts, headers, body });
+        const ct = res.headers.get('content-type') || '';
+        const isJson = ct.includes('application/json');
+        if (!res.ok) {
+            const msg = isJson ? await res.json() : await res.text();
+            throw new Error(`HTTP ${res.status}: ${isJson ? JSON.stringify(msg) : msg}`);
+        }
+        return isJson ? res.json() : res.text();
+    }
 
-        if (!form || !btn) {
-            console.warn('create-profile.js: signupForm or button not found on the page');
+    function ensureArea() {
+        // Reuse existing containers on the frontpage
+        const area = $('publicResults') || $('contentArea');
+        if (!area) return null;
+        // Force left align like frontpage.js does
+        area.style.textAlign = 'left';
+        return area;
+    }
+
+    function renderForm() {
+        return `
+            <h3>Create Profile</h3>
+            <div class="form" style="text-align:left;display:flex;flex-wrap:wrap;gap:12px 16px;align-items:center;">
+                <label>Username <input id="cpName" type="text" autocomplete="username" /></label>
+                <label>Password <input id="cpPassword" type="password" autocomplete="new-password" /></label>
+                <label>Type
+                    <select id="cpType">
+                        <option value="MUSICIAN" selected>Musician</option>
+                        <option value="ADMIN">Admin</option>
+                    </select>
+                </label>
+                <button id="cpSubmitBtn" type="button">Create</button>
+                <span id="cpStatus" class="meta" aria-live="polite"></span>
+            </div>
+        `;
+    }
+
+    async function doRegister(name, password, type) {
+        // Adjust to your backend endpoint. If not present, an error is shown.
+        // Expected payload: { name, password, type }
+        return fetchJson('/api/profile/register', {
+            method: 'POST',
+            body: { name, password, type }
+        });
+    }
+
+    async function doLogin(name, password) {
+        return fetchJson('/api/login', {
+            method: 'POST',
+            body: { name, password }
+        });
+    }
+
+    function showCreateProfile() {
+        const area = ensureArea();
+        if (!area) {
+            alert('Create profile UI not available.');
             return;
         }
+        area.innerHTML = renderForm();
 
-        // prevent double-binding if already attached
-        if (btn.dataset.signupAttached === 'true') {
-            console.debug('create-profile.js: click handler already attached');
-            return;
-        }
-        btn.dataset.signupAttached = 'true';
+        const status = document.getElementById('cpStatus');
+        const btn = document.getElementById('cpSubmitBtn');
 
-        console.debug('create-profile.js: attaching click handler');
+        if (btn && !btn.dataset.attached) {
+            btn.dataset.attached = 'true';
+            btn.addEventListener('click', async () => {
+                const name = (document.getElementById('cpName')?.value || '').trim();
+                const password = (document.getElementById('cpPassword')?.value || '').trim();
+                const type = (document.getElementById('cpType')?.value || 'MUSICIAN').trim();
 
-        btn.addEventListener('click', async () => {
-            try {
-                if (status) status.textContent = 'Creating profile...';
-                console.debug('create-profile.js: createProfileBtn clicked');
-
-                const payload = {
-                    name: (document.getElementById('name') || {}).value?.trim() || '',
-                    password: (document.getElementById('password') || {}).value?.trim() || ''
-                };
-
-                // basic front-end validation
-                if (!payload.name || !payload.password) {
+                if (!name || !password) {
                     if (status) status.textContent = 'Username and password are required.';
                     return;
                 }
 
-                // Send as JSON to match backend controller expectations
-                const headers = {
-                    'Content-Type': 'application/json; charset=UTF-8',
-                    'Accept': 'application/json'
-                };
+                try {
+                    if (status) status.textContent = 'Creating profile...';
+                    const created = await doRegister(name, password, type);
 
-                // add CSRF token if Spring Security is enforcing CSRF
-                const xsrf = getCookie('XSRF-TOKEN');
-                if (xsrf) headers['X-XSRF-TOKEN'] = xsrf;
+                    if (status) status.textContent = 'Signing in...';
+                    const authed = await doLogin(name, password);
 
-                const res = await fetch('/api/profile/signup', {
-                    method: 'POST',
-                    headers,
-                    body: JSON.stringify(payload),
-                    credentials: 'same-origin'
-                });
-
-                // accept 200 or 201 as success
-                if (res.ok && (res.status === 200 || res.status === 201)) {
-                    if (status) status.textContent = 'Profile created. Redirecting to start...';
-                    setTimeout(() => { window.location.href = '/'; }, 700);
-                    return;
+                    // Mirror frontpage.js behavior
+                    sessionStorage.setItem('authOk', 'true');
+                    if (authed && authed.type === 'ADMIN') {
+                        window.location.href = '/admin';
+                        return;
+                    }
+                    if (status) status.textContent = 'Profile created. You are signed in.';
+                    // Switch to auth view if frontpage helpers exist
+                    if (window.SetlistGPT && typeof window.SetlistGPT.showAuthView === 'function') {
+                        window.SetlistGPT.showAuthView();
+                    }
+                } catch (e) {
+                    const msg = String(e.message || e);
+                    if (/HTTP 404/i.test(msg)) {
+                        if (status) status.textContent = 'Registration endpoint not available.';
+                    } else {
+                        if (status) status.textContent = `Failed: ${msg}`;
+                    }
                 }
-
-                if (res.status === 409) {
-                    if (status) status.textContent = 'Username already exists. Choose another.';
-                    return;
-                }
-
-                const text = await res.text().catch(() => '');
-                const msg = text || res.statusText || 'Signup failed';
-                if (status) status.textContent = 'Signup failed: ' + msg;
-                console.warn('create-profile.js: signup failed', res.status, msg);
-            } catch (e) {
-                if (status) status.textContent = 'Network error creating profile';
-                console.error('create-profile.js error', e);
-            }
-        });
+            });
+        }
     }
 
-    // Run once immediately (defer ensures DOM is parsed), and once on DOMContentLoaded as a safety net.
-    attachSignupHandler();
-    document.addEventListener('DOMContentLoaded', attachSignupHandler);
+    // Expose API used by `frontpage.js`
+    window.CreateProfile = Object.assign(window.CreateProfile || {}, {
+        showCreateProfile
+    });
 })();

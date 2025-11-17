@@ -9,6 +9,11 @@
 <body>
 <header>
     <h1>SetlistGPT</h1>
+
+    <!-- Admin button shown only for admins (Thymeleaf reads session attribute "profile") -->
+    <button id="adminBtn" type="button" class="btn"
+            th:if="${session.profile != null and session.profile.type == T(dk.ek.setlistgpt.profile.ProfileType).ADMIN}"
+            onclick="window.location.href='/admin'">Admin</button>
 </header>
 
 <section id="publicView">
@@ -29,11 +34,12 @@
     </div>
 
     <div id="loginArea" class="hidden">
-        <div class="form">
-            <label>Username <input id="username" type="text" /></label>
-            <label>Password <input id="password" type="password" /></label>
-            <button id="loginBtn" type="button">Login</button>
-        </div>
+        <form id="loginForm" action="#" method="post" onsubmit="return false;">
+            <label>Username <input id="username" type="text" autocomplete="username"></label>
+            <label>Password <input id="password" type="password" autocomplete="current-password"></label>
+            <button id="loginBtn" type="button">Sign in</button>
+            <span class="meta" aria-live="polite"></span>
+        </form>
     </div>
 
     <div id="publicStatus" class="meta" aria-live="polite"></div>
@@ -56,7 +62,8 @@
     <p>&copy; SetlistGPT</p>
 </footer>
 
-<script th:src="@{/javascript/frontpage.js(v=10)}" src="/javascript/frontpage.js?v=10" defer></script>
+<script defer src="/javascript/login-hotfix.js"></script>
+<script defer src="/javascript/frontpage.js"></script>
 <script th:src="@{/javascript/create-profile.js(v=3)}" src="/javascript/create-profile.js?v=3" defer></script>
 </body>
 </html>

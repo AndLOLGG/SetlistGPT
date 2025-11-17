@@ -4,10 +4,9 @@
  * - CSRF‑aware fetch JSON helper
  * - Public/Auth view switching and session restore
  * - Login/Logout handlers
- * - Load repertoires and songs
- * - Create repertoire/setlist flow (multi‑set support; row‑breaks for layout)
+ * - Load repertoires and setlists
+ * - Create repertoire/setlist flow (multi‑set support)
  * - Public navigation handlers
- * - Diagnostics export
  */
 (function () {
     'use strict';
@@ -43,11 +42,11 @@
     }
     function escapeHtml(s) {
         return String(s ?? '')
-            .replace(/&/g, '&amp;')
-            .replace(/</g, '&lt;')
-            .replace(/>/g, '&gt;')
-            .replace(/"/g, '&quot;')
-            .replace(/'/g, '&#39;');
+            .replace(/&/g,'&amp;')
+            .replace(/</g,'&lt;')
+            .replace(/>/g,'&gt;')
+            .replace(/"/g,'&quot;')
+            .replace(/'/g,'&#39;');
     }
     function getCookie(name) {
         const m = document.cookie.match('(?:^|; )' + name.replace(/([$?*|{}\]\\^])/g, '\\$1') + '=([^;]*)');
@@ -56,24 +55,21 @@
     async function fetchJson(url, opts = {}) {
         const headers = Object.assign({ Accept: 'application/json' }, opts.headers || {});
         let body = opts.body;
-        if (!(body instanceof FormData) && body && typeof body === 'object') {
-            headers['Content-Type'] = headers['Content-Type'] || 'application/json; charset=UTF-8';
+        if (body && typeof body === 'object' && !(body instanceof FormData)) {
+            headers['Content-Type'] = 'application/json';
             body = JSON.stringify(body);
         }
         const xsrf = getCookie('XSRF-TOKEN');
         if (xsrf) headers['X-XSRF-TOKEN'] = xsrf;
-
-        const res = await fetch(url, { credentials: 'same-origin', ...opts, headers, body });
+        const res = await fetch(url, { credentials: 'include', ...opts, headers, body });
         const ct = res.headers.get('content-type') || '';
-        const isJson = ct.includes('application/json');
         if (!res.ok) {
-            const msg = isJson ? JSON.stringify(await res.json()).slice(0, 200) : (await res.text()).slice(0, 200);
-            throw new Error(`HTTP ${res.status}: ${msg}`);
+            let errText = ct.includes('application/json') ? JSON.stringify(await res.json()) : await res.text();
+            throw new Error('HTTP ' + res.status + ' ' + res.statusText + ' - ' + errText);
         }
-        return isJson ? res.json() : res.text();
+        return ct.includes('application/json') ? res.json() : res.text();
     }
 
-    // Ensure left alignment where we inject content (overrides any global center styles)
     function enforceLeftAlignment() {
         const ca = $('contentArea');
         if (ca) ca.style.textAlign = 'left';
@@ -117,44 +113,31 @@
     function renderRepertoireList(list, { clickableIds = false } = {}) {
         if (!Array.isArray(list) || list.length === 0) return '<p>No repertoires.</p>';
         const rows = list.map(r => {
-            const id = r.id ?? '';
-            const name = escapeHtml(r.name ?? '(unnamed)');
-            const vis = escapeHtml(String(r.visibility ?? 'PRIVATE'));
-            const caption = `${name} — Visibility: ${vis}`;
-            if (clickableIds && id) {
-                return `<li><button type="button" class="linklike" data-rep-id="${id}">${caption}</button></li>`;
-            }
-            return `<li>${caption}</li>`;
+            const id = escapeHtml(r.id);
+            const title = escapeHtml(r.title || '(untitled)');
+            return `<li data-id="${id}" ${clickableIds ? 'class="clickable"' : ''}>${title}</li>`;
         });
         return `<ul>${rows.join('')}</ul>`;
     }
-
     function renderSetlistSummaries(list) {
         if (!Array.isArray(list) || list.length === 0) return '<p>No setlists found.</p>';
         const rows = list.map(s => {
-            const title = escapeHtml(s.title ?? 'Setlist');
-            const dur = Number(s.totalDurationSeconds ?? 0);
-            const when = escapeHtml(s.createdAt ?? '');
-            const extra = [];
-            if (dur) extra.push(`Duration: ${fmtDuration(dur)}`);
-            if (when) extra.push(when);
-            return `<li><strong>${title}</strong>${extra.length ? ' — ' + extra.join(' • ') : ''}</li>`;
+            const id = escapeHtml(s.id);
+            const title = escapeHtml(s.title || '(untitled)');
+            const dur = fmtDuration(s.totalDurationSeconds || 0);
+            const cnt = s.items ?? 0;
+            const ts = escapeHtml(s.createdAt || '');
+            return `<li><strong>${title}</strong> - ${cnt} songs - ${dur} <span class="meta">${ts}</span></li>`;
         });
         return `<ul>${rows.join('')}</ul>`;
     }
-
     function renderSongListNumbered(songs) {
         if (!Array.isArray(songs) || songs.length === 0) return '<p>No songs.</p>';
-        const items = songs.map(s => {
-            const title = escapeHtml(s.title ?? '(untitled)');
-            const artist = escapeHtml(s.artist ?? '');
-            const mood = escapeHtml(s.mood ?? '');
-            const g = escapeHtml(s.genre ?? '');
-            const d = fmtDuration(Number(s.durationInSeconds ?? 0));
-            const bits = [title, artist && `— ${artist}`, g && `(${g})`, mood && `[${mood}]`, d && ` — ${d}`]
-                .filter(Boolean)
-                .join(' ');
-            return `<li>${bits}</li>`;
+        const items = songs.map((s,i) => {
+            const title = escapeHtml(s.title || s.artist || '(untitled)');
+            const artist = escapeHtml(s.artist || '');
+            const dur = fmtDuration(s.durationInSeconds || (s.durationMinutes*60 + s.durationSeconds) || 0);
+            return `<li>${i+1}. ${title}${artist? ' - ' + artist : ''} <span class="meta">${dur}</span></li>`;
         });
         return `<ol>${items.join('')}</ol>`;
     }
@@ -172,70 +155,176 @@
         const results = $('publicResults');
         const status = $('publicStatus');
 
+        // Single canonical doLogin (form-encoded, sends XSRF header if cookie present)
+        const doLogin = async () => {
+            if (!status) return;
+            const uEl = $('username');
+            const pEl = $('password');
+            const u = uEl ? uEl.value.trim() : '';
+            const p = pEl ? pEl.value : '';
+            if (!u || !p) {
+                status.textContent = 'Enter username and password.';
+                return;
+            }
+            status.textContent = 'Logging in...';
+            if (loginBtn) loginBtn.disabled = true;
+
+            try {
+                const form = new URLSearchParams();
+                form.append('username', u);
+                form.append('password', p);
+
+                // NOTE: remove `redirect: 'manual'` to avoid some browsers returning opaque status 0 for redirects.
+                const res = await fetch('/login', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                    body: form.toString(),
+                    credentials: 'include'
+                });
+
+                console.debug('/login fetch ->', { status: res.status, statusText: res.statusText, url: res.url, redirected: res.redirected, type: res.type });
+                try { console.debug('Resp headers:', Array.from(res.headers.entries())); } catch (e) {}
+
+                // If browser returned an opaque/zero result, treat as failure and fall back.
+                if (!res || res.status === 0 || (res.type === 'opaque' && !res.ok)) {
+                    throw new Error('Opaque / status 0 response from fetch');
+                }
+
+                const location = (res.headers.get('location') || '').toLowerCase();
+                const redirectedToError = (location && location.includes('error')) || (res.url && res.url.toLowerCase().includes('error'));
+                const success = (res.ok || res.status === 302 || res.status === 303 || res.status === 204 || res.redirected) && !redirectedToError;
+
+                if (success) {
+                    sessionStorage.setItem('authOk','1');
+                    status.textContent = '';
+                    hide(loginArea);
+                    showAuthView();
+                    try { attachAuthControls(); } catch (e) {}
+                    return;
+                }
+
+                // Try to build helpful message
+                let msg = `Login failed (status ${res.status}).`;
+                try {
+                    const ct = res.headers.get('content-type') || '';
+                    if (ct.includes('application/json')) {
+                        const j = await res.clone().json().catch(()=>null);
+                        if (j && (j.error || j.message)) msg = 'Login failed: ' + (j.error || j.message);
+                    } else {
+                        const t = await res.clone().text().catch(()=>null);
+                        if (t) {
+                            const stripped = t.replace(/<[^>]*>/g,'').trim();
+                            if (stripped && stripped.length < 200) msg = 'Login failed: ' + stripped;
+                        }
+                    }
+                } catch (e) { /* ignore parse errors */ }
+
+                status.textContent = msg;
+            } catch (e) {
+                // Detailed debug info for network/opaque errors
+                console.error('doLogin fetch failed:', e);
+                // Fallback: submit a real form (ensures browser handles redirects/cookies)
+                try {
+                    const realForm = document.createElement('form');
+                    realForm.method = 'post';
+                    realForm.action = '/login';
+                    // ensure credentials are posted with expected parameter names
+                    const inU = document.createElement('input');
+                    inU.type = 'hidden';
+                    inU.name = 'username';
+                    inU.value = u;
+                    const inP = document.createElement('input');
+                    inP.type = 'hidden';
+                    inP.name = 'password';
+                    inP.value = p;
+                    realForm.appendChild(inU);
+                    realForm.appendChild(inP);
+
+                    // If a server-side CSRF hidden input exists on the page (Thymeleaf), clone it into the fallback form.
+                    const existingCsrf = document.querySelector('input[type="hidden"][name*="csrf"], input[type="hidden"][name*="_csrf"]');
+                    if (existingCsrf && existingCsrf.name && existingCsrf.value) {
+                        const cs = document.createElement('input');
+                        cs.type = 'hidden';
+                        cs.name = existingCsrf.name;
+                        cs.value = existingCsrf.value;
+                        realForm.appendChild(cs);
+                    }
+
+                    // append, submit and remove
+                    document.body.appendChild(realForm);
+                    realForm.submit();
+                    // do not reach the cleanup too soon; browser will navigate
+                } catch (formErr) {
+                    console.error('Fallback form submit failed:', formErr);
+                    status.textContent = 'Login failed.';
+                }
+            } finally {
+                if (loginBtn) loginBtn.disabled = false;
+            }
+        };
+
         if (showLoginBtn && !showLoginBtn.dataset.attached) {
-            showLoginBtn.dataset.attached = 'true';
             showLoginBtn.addEventListener('click', () => {
                 show(loginArea);
-                const u = $('username'); if (u) u.focus();
-            });
-        }
-        if (loginBtn && !loginBtn.dataset.attached) {
-            loginBtn.dataset.attached = 'true';
-            loginBtn.addEventListener('click', async () => {
-                if (status) status.textContent = 'Logging in...';
-                // Placeholder demo login
-                await new Promise(r => setTimeout(r, 200));
-                sessionStorage.setItem('authOk', 'true');
                 if (status) status.textContent = '';
-                showAuthView();
             });
+            showLoginBtn.dataset.attached = '1';
+        }
+        if (loginBtn) loginBtn.setAttribute('type','button');
+        if (loginBtn && !loginBtn.dataset.attached) {
+            loginBtn.addEventListener('click', doLogin);
+            loginBtn.dataset.attached='1';
+        }
+        const loginForm = $('loginForm');
+        if (loginForm && !loginForm.dataset.attached) {
+            loginForm.addEventListener('submit', e => { e.preventDefault(); doLogin(); });
+            loginForm.dataset.attached='1';
         }
         if (createProfileBtn && !createProfileBtn.dataset.attached) {
-            createProfileBtn.dataset.attached = 'true';
             createProfileBtn.addEventListener('click', () => {
-                window.location.href = '/profile/create';
+                window.location.href='/profile';
             });
+            createProfileBtn.dataset.attached='1';
         }
         if (seePublicBtn && !seePublicBtn.dataset.attached) {
-            seePublicBtn.dataset.attached = 'true';
             seePublicBtn.addEventListener('click', () => {
                 showPublicBrowser();
             });
+            seePublicBtn.dataset.attached='1';
         }
         if (backBtn && !backBtn.dataset.attached) {
-            backBtn.dataset.attached = 'true';
             backBtn.addEventListener('click', () => {
                 showPublicHome();
             });
+            backBtn.dataset.attached='1';
         }
         if (publicRepsBtn && !publicRepsBtn.dataset.attached) {
-            publicRepsBtn.dataset.attached = 'true';
             publicRepsBtn.addEventListener('click', async () => {
-                if (!results) return;
-                results.textContent = 'Loading public repertoires...';
+                results.innerHTML = '<p>Loading public repertoires...</p>';
+                if (status) status.textContent = '';
+                enforceLeftAlignment();
                 try {
-                    const list = await fetchJson('/api/repertoires/public');
-                    results.innerHTML = renderRepertoireList(list, { clickableIds: true });
-                    results.querySelectorAll('button.linklike[data-rep-id]').forEach(btn => {
-                        btn.addEventListener('click', () => showPublicRepertoireDetails(btn.dataset.repId));
-                    });
+                    const data = await fetchJson('/api/repertoires'); // assumes endpoint exists
+                    results.innerHTML = '<h3>Public Repertoires</h3>' + renderRepertoireList(data);
                 } catch (e) {
-                    results.textContent = 'Failed to load public repertoires.';
+                    results.innerHTML = '<p>Error loading repertoires.</p>';
                 }
             });
+            publicRepsBtn.dataset.attached='1';
         }
         if (publicSetlistsBtn && !publicSetlistsBtn.dataset.attached) {
-            publicSetlistsBtn.dataset.attached = 'true';
             publicSetlistsBtn.addEventListener('click', async () => {
-                if (!results) return;
-                results.textContent = 'Loading setlists...';
+                results.innerHTML = '<p>Loading public setlists...</p>';
+                if (status) status.textContent = '';
+                enforceLeftAlignment();
                 try {
-                    const list = await fetchJson('/api/setlists');
-                    results.innerHTML = renderSetlistSummaries(list);
+                    const data = await fetchJson('/api/setlists');
+                    results.innerHTML = '<h3>Public Setlists</h3>' + renderSetlistSummaries(data);
                 } catch (e) {
-                    results.textContent = 'Failed to load setlists.';
+                    results.innerHTML = '<p>Error loading setlists.</p>';
                 }
             });
+            publicSetlistsBtn.dataset.attached='1';
         }
     }
 
@@ -244,51 +333,48 @@
         const status = $('publicStatus');
         if (!results) return;
         try {
-            results.textContent = 'Loading repertoire...';
-            const r = await fetchJson(`/api/repertoires/${id}`);
-            const songs = await fetchJson(`/api/repertoires/${id}/songs`);
-            results.innerHTML = `
-                <h3>${escapeHtml(r.name ?? 'Repertoire')}</h3>
-                <p class="meta">Visibility: ${escapeHtml(r.visibility ?? 'PRIVATE')}</p>
-                ${renderSongListNumbered(songs)}
-            `;
+            if (status) status.textContent = 'Loading repertoire...';
+            const rep = await fetchJson('/api/repertoires/' + encodeURIComponent(id));
             if (status) status.textContent = '';
+            results.innerHTML = '<h3>Repertoire</h3>' + renderSongListNumbered(rep.songs || []);
         } catch (e) {
-            if (status) status.textContent = 'Failed to load repertoire.';
-            results.textContent = '';
+            if (status) status.textContent = 'Error.';
+            results.innerHTML = '<p>Failed to load repertoire.</p>';
         }
     }
 
     // ---------- Auth handlers ----------
     function attachAuthControls() {
+        // grab the auth view controls (may be undefined if not present)
         const newSetlistBtn = $('newSetlistBtn');
         const setlistsBtn = $('setlistsBtn');
-        const logoutBtn = $('logoutBtn');
         const newRepertoireBtn = $('newRepertoireBtn');
         const myRepertoiresBtn = $('myRepertoiresBtn');
+        const logoutBtn = $('logoutBtn');
 
         if (newSetlistBtn && !newSetlistBtn.dataset.attached) {
-            newSetlistBtn.dataset.attached = 'true';
-            newSetlistBtn.addEventListener('click', () => createSetlistFlow());
+            newSetlistBtn.addEventListener('click', createSetlistFlow);
+            newSetlistBtn.dataset.attached='1';
         }
         if (setlistsBtn && !setlistsBtn.dataset.attached) {
-            setlistsBtn.dataset.attached = 'true';
-            setlistsBtn.addEventListener('click', () => loadMySetlists());
+            setlistsBtn.addEventListener('click', loadMySetlists);
+            setlistsBtn.dataset.attached='1';
         }
         if (newRepertoireBtn && !newRepertoireBtn.dataset.attached) {
-            newRepertoireBtn.dataset.attached = 'true';
-            newRepertoireBtn.addEventListener('click', () => createRepertoireFlow());
+            newRepertoireBtn.addEventListener('click', createRepertoireFlow);
+            newRepertoireBtn.dataset.attached='1';
         }
         if (myRepertoiresBtn && !myRepertoiresBtn.dataset.attached) {
-            myRepertoiresBtn.dataset.attached = 'true';
-            myRepertoiresBtn.addEventListener('click', () => loadMyRepertoires());
+            myRepertoiresBtn.addEventListener('click', loadMyRepertoires);
+            myRepertoiresBtn.dataset.attached='1';
         }
         if (logoutBtn && !logoutBtn.dataset.attached) {
-            logoutBtn.dataset.attached = 'true';
-            logoutBtn.addEventListener('click', () => {
+            logoutBtn.addEventListener('click', async () => {
+                try { await fetchJson('/logout',{ method:'POST' }); } catch(e){}
                 sessionStorage.removeItem('authOk');
                 showPublicHome();
             });
+            logoutBtn.dataset.attached='1';
         }
     }
 
@@ -300,49 +386,37 @@
         enforceLeftAlignment();
         try {
             const list = await fetchJson('/api/setlists');
-            area.innerHTML = `
-                <h3>My Setlists</h3>
-                ${renderSetlistSummaries(list)}
-            `;
+            area.innerHTML = '<h3>My Setlists</h3>' + renderSetlistSummaries(list);
         } catch (e) {
-            area.textContent = 'Failed to load setlists.';
+            area.innerHTML = '<p>Error loading setlists.</p>';
         }
     }
-
     async function loadMyRepertoires() {
         const area = $('contentArea');
         if (!area) return;
         area.textContent = 'Loading repertoires...';
         enforceLeftAlignment();
         try {
-            const list = await fetchJson('/api/repertoires');
-            area.innerHTML = `
-                <h3>My Repertoires</h3>
-                ${renderRepertoireList(list, { clickableIds: true })}
-            `;
-            area.querySelectorAll('button.linklike[data-rep-id]').forEach(btn => {
-                btn.addEventListener('click', () => showRepertoireDetails(btn.dataset.repId));
+            const reps = await fetchJson('/api/repertoires');
+            area.innerHTML = '<h3>My Repertoires</h3>' + renderRepertoireList(reps, { clickableIds:true });
+            // click handler
+            area.querySelectorAll('li.clickable').forEach(li => {
+                li.addEventListener('click', () => showRepertoireDetails(li.dataset.id));
             });
         } catch (e) {
-            area.textContent = 'Failed to load repertoires.';
+            area.innerHTML = '<p>Error loading repertoires.</p>';
         }
     }
-
     async function showRepertoireDetails(id) {
         const area = $('contentArea');
         if (!area) return;
         area.textContent = 'Loading repertoire...';
         enforceLeftAlignment();
         try {
-            const r = await fetchJson(`/api/repertoires/${id}`);
-            const songs = await fetchJson(`/api/repertoires/${id}/songs`);
-            area.innerHTML = `
-                <h3>${escapeHtml(r.name ?? 'Repertoire')}</h3>
-                <p class="meta">Visibility: ${escapeHtml(r.visibility ?? 'PRIVATE')}</p>
-                ${renderSongListNumbered(songs)}
-            `;
+            const rep = await fetchJson('/api/repertoires/' + encodeURIComponent(id));
+            area.innerHTML = `<h3>Repertoire: ${escapeHtml(rep.title || '(untitled)')}</h3>` + renderSongListNumbered(rep.songs || []);
         } catch (e) {
-            area.textContent = 'Failed to load repertoire.';
+            area.innerHTML = '<p>Error loading repertoire.</p>';
         }
     }
 
@@ -352,42 +426,9 @@
         if (!area) return;
         area.innerHTML = `
             <h3>New Repertoire</h3>
-            <div class="form" style="text-align:left;display:flex;flex-wrap:wrap;gap:12px 16px;align-items:center;">
-                <label>Name <input id="repName" type="text" /></label>
-                <label>Visibility
-                    <select id="repVisibility">
-                        <option value="PRIVATE">Private</option>
-                        <option value="PUBLIC">Public</option>
-                    </select>
-                </label>
-                <button id="createRepBtn" type="button">Create</button>
-                <span id="repStatus" class="meta" aria-live="polite"></span>
-            </div>
+            <p>Not implemented in this snippet.</p>
         `;
         enforceLeftAlignment();
-        const btn = $('createRepBtn');
-        const status = $('repStatus');
-        if (btn && !btn.dataset.attached) {
-            btn.dataset.attached = 'true';
-            btn.addEventListener('click', async () => {
-                try {
-                    const name = ($('repName')?.value || '').trim();
-                    const visibility = $('repVisibility')?.value || 'PRIVATE';
-                    if (!name) {
-                        if (status) status.textContent = 'Name is required.';
-                        return;
-                    }
-                    if (status) status.textContent = 'Creating...';
-                    const created = await fetchJson('/api/repertoires', {
-                        method: 'POST',
-                        body: { name, visibility }
-                    });
-                    if (status) status.textContent = `Created: ${escapeHtml(created.name)}.`;
-                } catch (e) {
-                    if (status) status.textContent = 'Failed to create repertoire.';
-                }
-            });
-        }
     }
 
     function createSetlistFlow() {
@@ -396,249 +437,182 @@
 
         const opt = (v, lbl = v) => `<option value="${escapeHtml(v)}">${escapeHtml(lbl)}</option>`;
         const pretty = (s) => String(s).replace(/_/g, ' ').replace(/ GROUP$/i, ' Group');
-        const groupOpts = GENRE_GROUPS.map(g => opt(g, pretty(g)));
-        const genreOpts = GENRES.map(g => opt(g, pretty(g)));
+
         const genreSelectHtml = [
             '<option value="">(none)</option>',
-            '<optgroup label="Groups">', ...groupOpts, '</optgroup>',
-            '<optgroup label="Genres">', ...genreOpts, '</optgroup>'
+            ...GENRE_GROUPS.map(g => opt(g, pretty(g))),
+            ...GENRES.map(g => opt(g, pretty(g)))
         ].join('');
         const moodSelectHtml = [
             '<option value="">(none)</option>',
             ...MOODS.map(m => opt(m, pretty(m)))
         ].join('');
 
-        // Note: Sets selector is FIRST; each subsequent group is forced to a new row.
+        const durationRowsHtml = [1, 2, 3].map(n => `
+        <div class="durRow" id="slDurRow${n}" style="display:none;gap:12px;align-items:center;flex-wrap:wrap;">
+            <label style="min-width:90px;">Set ${n} Duration</label>
+            <label>Minutes
+                <input id="slMin${n}" type="number" min="0" max="59" value="${n === 1 ? 10 : 0}" style="width:70px;">
+            </label>
+            <label>Seconds
+                <input id="slSec${n}" type="number" min="0" max="59" value="0" style="width:70px;">
+            </label>
+        </div>
+    `).join('');
+
         area.innerHTML = `
         <h3>New Setlist</h3>
-        <div class="form" style="text-align:left;display:flex;flex-wrap:wrap;gap:12px 16px;align-items:center;">
+        <div class="form" style="text-align:left;display:flex;flex-direction:column;gap:14px;max-width:1000px;">
 
-            <!-- Row 1: Sets (first, on top line) -->
-            <label>Sets
-                <select id="slSetCount">
-                    <option value="1">1 set</option>
-                    <option value="2">2 sets</option>
-                    <option value="3">3 sets</option>
-                </select>
-            </label>
+            <div class="row" style="display:flex;align-items:center;gap:24px;flex-wrap:wrap;">
+                <label>Sets
+                    <select id="slSets">
+                        <option value="1" selected>1</option>
+                        <option value="2">2</option>
+                        <option value="3">3</option>
+                    </select>
+                </label>
+                <span class="meta">Choose how many separate sets to build.</span>
+            </div>
 
-            <!-- Row break -->
-            <div style="flex-basis:100%;height:0;"></div>
+            <div class="row" style="display:flex;align-items:center;gap:24px;flex-wrap:wrap;">
+                <label>Title
+                    <input id="slTitle" type="text" placeholder="Title or Artist required">
+                </label>
+                <label>Artist
+                    <input id="slArtist" type="text" placeholder="Title or Artist required">
+                </label>
+                <label>Genre / Group
+                    <select id="slGenre">${genreSelectHtml}</select>
+                </label>
+            </div>
 
-            <!-- Row 2: Title / Artist / Genre -->
-            <label>Title <input id="slTitle" type="text" /></label>
-            <label>Artist <input id="slArtist" type="text" /></label>
-            <label>Genre or Group
-                <select id="slGenre">${genreSelectHtml}</select>
-            </label>
+            <div class="row" style="display:flex;align-items:center;gap:24px;flex-wrap:wrap;">
+                <label>Mood
+                    <select id="slMood">${moodSelectHtml}</select>
+                </label>
+            </div>
 
-            <!-- Row break -->
-            <div style="flex-basis:100%;height:0;"></div>
+            <div id="slDurationRows" style="display:flex;flex-direction:column;gap:8px;">
+                ${durationRowsHtml}
+            </div>
 
-            <!-- Row 3: Mood -->
-            <label class="mood-line" style="display:inline-flex;align-items:center;gap:8px;">
-                <span>Mood</span>
-                <select id="slMood">${moodSelectHtml}</select>
-            </label>
-
-            <!-- Row break -->
-            <div style="flex-basis:100%;height:0;"></div>
-
-            <!-- Row 4/5/6: Per-set durations -->
-            <label id="set1Box" style="display:inline-flex;align-items:center;gap:6px;">
-                <span>Set 1 (mm:ss)</span>
-                <input id="slM1" type="number" min="0" max="59" value="10" style="width:5em" />
-                <span>:</span>
-                <input id="slS1" type="number" min="0" max="59" value="0" style="width:5em" />
-            </label>
-
-            <div style="flex-basis:100%;height:0;"></div>
-
-            <label id="set2Box" style="display:none;align-items:center;gap:6px;">
-                <span>Set 2 (mm:ss)</span>
-                <input id="slM2" type="number" min="0" max="59" value="0" style="width:5em" />
-                <span>:</span>
-                <input id="slS2" type="number" min="0" max="59" value="0" style="width:5em" />
-            </label>
-
-            <div id="brSet2" style="display:none;flex-basis:100%;height:0;"></div>
-
-            <label id="set3Box" style="display:none;align-items:center;gap:6px;">
-                <span>Set 3 (mm:ss)</span>
-                <input id="slM3" type="number" min="0" max="59" value="0" style="width:5em" />
-                <span>:</span>
-                <input id="slS3" type="number" min="0" max="59" value="0" style="width:5em" />
-            </label>
-
-            <!-- Row break -->
-            <div style="flex-basis:100%;height:0;"></div>
-
-            <!-- Row 7: Reuse + Build -->
-            <label style="display:inline-flex;align-items:center;gap:6px;">
-                <input id="slReuse" type="checkbox" />
-                <span>Allow song reuse</span>
-            </label>
-            <button id="buildSetlistBtn" type="button">Build</button>
-            <span id="setlistStatus" class="meta" aria-live="polite"></span>
+            <div class="row" style="display:flex;align-items:center;gap:24px;flex-wrap:wrap;">
+                <label><input id="slReuse" type="checkbox"> Allow Reuse</label>
+                <button id="slBuildBtn" type="button">Build &amp; Save</button>
+                <span id="slStatus" class="meta" aria-live="polite"></span>
+            </div>
         </div>
-        <div id="setlistResults" style="text-align:left;"></div>
-        `;
+        <div id="slResult" style="margin-top:16px"></div>
+    `;
         enforceLeftAlignment();
 
-        // Toggle set boxes based on count
-        const setCountSel = $('slSetCount');
-        function syncSetBoxes() {
-            const c = Number(setCountSel.value || '1');
-            const s2 = $('set2Box'), br2 = $('brSet2'), s3 = $('set3Box');
-            if (c >= 2) {
-                if (s2) s2.style.display = 'inline-flex';
-                if (br2) br2.style.display = 'block';
-            } else {
-                if (s2) s2.style.display = 'none';
-                if (br2) br2.style.display = 'none';
-            }
-            if (c >= 3) {
-                if (s3) s3.style.display = 'inline-flex';
-            } else {
-                if (s3) s3.style.display = 'none';
+        const setsSel = $('slSets');
+        function updateSetRowsVisibility() {
+            const sets = parseInt(setsSel.value, 10) || 1;
+            for (let i = 1; i <= 3; i++) {
+                const row = $('slDurRow' + i);
+                if (row) row.style.display = i <= sets ? 'flex' : 'none';
             }
         }
-        setCountSel.addEventListener('change', syncSetBoxes);
-        syncSetBoxes();
+        setsSel.addEventListener('change', updateSetRowsVisibility);
+        updateSetRowsVisibility();
 
-        const btn = $('buildSetlistBtn');
-        const status = $('setlistStatus');
-        const results = $('setlistResults');
+        const buildBtn = $('slBuildBtn');
+        const status = $('slStatus');
+        const result = $('slResult');
 
-        function clamp01(v, max) {
-            const n = Number(v || 0);
-            if (!Number.isFinite(n)) return 0;
-            return Math.max(0, Math.min(max, n | 0));
-        }
-        function secondsFrom(mm, ss) {
-            return clamp01(mm, 59) * 60 + clamp01(ss, 59);
-        }
+        if (buildBtn && !buildBtn.dataset.attached) {
+            buildBtn.addEventListener('click', async () => {
+                status.textContent = 'Building...';
+                result.innerHTML = '';
+                const baseTitle = $('slTitle').value.trim();
+                const artist = $('slArtist').value.trim();
+                const genre = $('slGenre').value.trim();
+                const mood = $('slMood').value.trim();
+                const reuse = $('slReuse').checked;
+                const sets = parseInt(setsSel.value, 10) || 1;
 
-        // Partition a flat song list into N sets by target durations
-        function partitionIntoSets(songs, setDurations) {
-            const sets = setDurations.map(() => []);
-            const totals = setDurations.map(() => 0);
-            let setIdx = 0;
+                if (!baseTitle && !artist) {
+                    status.textContent = 'Enter title or artist.';
+                    return;
+                }
 
-            for (const song of songs) {
-                if (setIdx >= setDurations.length) break;
-                const d = Math.max(0, Number(song.durationInSeconds || 0));
-                // place into current set if it fits, otherwise move to next set
-                if (totals[setIdx] + d <= setDurations[setIdx]) {
-                    sets[setIdx].push(song);
-                    totals[setIdx] += d;
-                } else {
-                    // try next sets until it fits (or spill into last anyway)
-                    let placed = false;
-                    for (let j = setIdx + 1; j < setDurations.length; j++) {
-                        if (totals[j] + d <= setDurations[j]) {
-                            sets[j].push(song);
-                            totals[j] += d;
-                            placed = true;
-                            break;
+                const durations = [];
+                for (let i = 1; i <= sets; i++) {
+                    const m = parseInt(($('slMin' + i).value || '0'), 10);
+                    const s = parseInt(($('slSec' + i).value || '0'), 10);
+                    durations.push({
+                        minutes: isNaN(m) ? 0 : Math.min(Math.max(m, 0), 59),
+                        seconds: isNaN(s) ? 0 : Math.min(Math.max(s, 0), 59)
+                    });
+                }
+
+                try {
+                    const allSets = [];
+                    for (let i = 0; i < sets; i++) {
+                        const { minutes, seconds } = durations[i];
+                        const title = baseTitle
+                            ? `${baseTitle} - Set ${i + 1}`
+                            : `Set ${i + 1}`;
+                        const payload = {
+                            title,
+                            artist,
+                            genre,
+                            bpm: null,
+                            mood,
+                            durationMinutes: minutes,
+                            durationSeconds: seconds,
+                            allowReuse: reuse
+                        };
+                        const songs = await fetchJson('/api/setlist', {
+                            method: 'POST',
+                            body: payload
+                        });
+                        if (Array.isArray(songs)) {
+                            allSets.push({ title, songs });
                         }
                     }
-                    if (!placed) {
-                        // if nowhere strictly fits, keep adding to the current set (spill)
-                        sets[setIdx].push(song);
-                        totals[setIdx] += d;
-                    }
-                }
-                // advance set when the current reached target (or exceeded slightly)
-                while (setIdx < setDurations.length && totals[setIdx] >= setDurations[setIdx]) {
-                    setIdx++;
-                }
-            }
-            return { sets, totals };
-        }
 
-        if (btn && !btn.dataset.attached) {
-            btn.dataset.attached = 'true';
-            btn.addEventListener('click', async () => {
-                try {
-                    if (status) status.textContent = 'Building...';
-                    results.innerHTML = '';
-
-                    const title = ($('slTitle')?.value || '').trim();
-                    const artist = ($('slArtist')?.value || '').trim();
-                    const genre = $('slGenre')?.value || '';
-                    const mood = $('slMood')?.value || '';
-                    const allowReuse = !!$('slReuse')?.checked;
-                    const setCount = Number($('slSetCount')?.value || '1');
-
-                    const d1 = secondsFrom($('slM1')?.value, $('slS1')?.value);
-                    const d2 = setCount >= 2 ? secondsFrom($('slM2')?.value, $('slS2')?.value) : 0;
-                    const d3 = setCount >= 3 ? secondsFrom($('slM3')?.value, $('slS3')?.value) : 0;
-
-                    const setDurations = [d1, d2, d3].slice(0, setCount);
-                    const total = setDurations.reduce((a, b) => a + b, 0);
-
-                    if (total < 1) {
-                        if (status) status.textContent = 'Please enter a duration.';
-                        return;
-                    }
-                    if (total > 59 * 60 + 59) {
-                        if (status) status.textContent = 'Total duration must be \u2264 59:59.';
-                        return;
-                    }
-
-                    const req = {
-                        title, artist, genre, mood,
-                        durationMinutes: Math.floor(total / 60),
-                        durationSeconds: total % 60,
-                        allowReuse
-                    };
-
-                    const songs = await fetchJson('/api/setlist', { method: 'POST', body: req });
-
-                    // Distribute combined result into the requested sets for display
-                    const { sets, totals } = partitionIntoSets(songs, setDurations);
-
-                    const parts = [];
-                    for (let i = 0; i < sets.length; i++) {
-                        parts.push(`<h4>Set ${i + 1} — ${fmtDuration(totals[i])}/${fmtDuration(setDurations[i])}</h4>`);
-                        parts.push(renderSongListNumbered(sets[i]));
-                    }
-                    const grand = totals.reduce((a, b) => a + b, 0);
-                    results.innerHTML = `
-                        <h3>Built Setlist</h3>
-                        <p class="meta">Total: ${fmtDuration(grand)} (target ${fmtDuration(total)})</p>
-                        ${parts.join('')}
+                    const blocks = allSets.map(set => {
+                        const durSec = set.songs.reduce((t, s) =>
+                            t + (s.durationMinutes * 60 + s.durationSeconds), 0);
+                        return `
+                        <div class="setBlock" style="margin-bottom:24px;">
+                            <h4>${escapeHtml(set.title)} (${fmtDuration(durSec)})</h4>
+                            ${renderSongListNumbered(set.songs)}
+                        </div>
                     `;
-                    if (status) status.textContent = 'Done.';
+                    }).join('');
+
+                    const totalSeconds = allSets.reduce((t, set) =>
+                        t + set.songs.reduce((tt, s) => tt + (s.durationMinutes * 60 + s.durationSeconds), 0), 0);
+
+                    result.innerHTML = (blocks || '<p>No songs generated.</p>') +
+                        (allSets.length > 1
+                            ? `<p><strong>Total Combined Duration:</strong> ${fmtDuration(totalSeconds)}</p>`
+                            : '');
+                    status.textContent = 'Done.';
                 } catch (e) {
-                    if (status) status.textContent = 'Failed to build setlist.';
+                    console.error(e);
+                    status.textContent = 'Error building setlist.';
                 }
             });
+            buildBtn.dataset.attached = '1';
         }
     }
 
-    // ---------- Boot ----------
-    function boot() {
+    // ---------- Init ----------
+    function init() {
         attachPublicControls();
         attachAuthControls();
-        if (sessionStorage.getItem('authOk') === 'true') {
+        if (sessionStorage.getItem('authOk')) {
             showAuthView();
         } else {
             showPublicHome();
         }
-
-        // Diagnostics export (optional)
-        window.SetlistGPT = Object.assign(window.SetlistGPT || {}, {
-            fmtDuration, fetchJson,
-            showPublicHome, showPublicBrowser, showAuthView,
-            loadMyRepertoires, loadMySetlists, createSetlistFlow, createRepertoireFlow
-        });
+        enforceLeftAlignment();
     }
 
-    if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', boot);
-    } else {
-        boot();
-    }
+    document.addEventListener('DOMContentLoaded', init);
 })();
