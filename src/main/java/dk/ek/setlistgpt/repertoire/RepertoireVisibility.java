@@ -5,6 +5,7 @@ import com.fasterxml.jackson.annotation.JsonValue;
 
 public enum RepertoireVisibility {
     PUBLIC,
+    AUTHENTICATED, // visible to authenticated profiles (logged‑in users)
     PRIVATE;
 
     @JsonCreator

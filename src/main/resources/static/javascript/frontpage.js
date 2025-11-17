@@ -557,32 +557,39 @@ console.log('frontpage.js loaded');
         const moodOptions = ['<option value="">(none)</option>', ...MOODS.map(m => `<option value="${escapeHtml(m)}">${escapeHtml(m)}</option>`)].join('');
 
         area.innerHTML = `
-        <h3>New Repertoire</h3>
-        <div class="form" style="text-align:left;display:flex;flex-direction:column;gap:12px;max-width:1100px;">
-            <div class="row" style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;">
-                <label style="min-width:120px;">Name
-                    <input id="repName" type="text" placeholder="Repertoire name">
-                </label>
-                <label style="display:flex;align-items:center;gap:8px;">
-                    <input id="repPublic" type="checkbox"> Public (viewable offline)
-                </label>
-                <label style="min-width:220px;">
-                    Number of rows
-                    <input id="repRows" type="number" min="0" value="3" style="width:80px;margin-left:6px;">
-                </label>
-                <button id="repMakeRowsBtn" type="button">Generate rows</button>
-                <button id="repAddRowBtn" type="button">Add song</button>
-                <button id="repClearBtn" type="button">Clear rows</button>
-            </div>
+    <h3>New Repertoire</h3>
+    <div class="form" style="text-align:left;display:flex;flex-direction:column;gap:12px;max-width:1100px;">
+        <div class="row" style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;">
+            <label style="min-width:120px;">Name
+                <input id="repName" type="text" placeholder="Repertoire name">
+            </label>
 
-            <div id="repRowsContainer" style="display:flex;flex-direction:column;gap:10px;margin-top:8px;"></div>
+            <label style="min-width:220px;">
+                Visibility
+                <select id="repVisibility">
+                    <option value="PRIVATE">PRIVATE</option>
+                    <option value="PUBLIC">PUBLIC</option>
+                    <option value="AUTHENTICATED">AUTHENTICATED</option>
+                </select>
+            </label>
 
-            <div style="display:flex;gap:12px;align-items:center;margin-top:8px;">
-                <button id="repCreateBtn" type="button">Create Repertoire</button>
-                <span id="repStatus" class="meta" aria-live="polite"></span>
-            </div>
+            <label style="min-width:220px;">
+                Number of rows
+                <input id="repRows" type="number" min="0" value="3" style="width:80px;margin-left:6px;">
+            </label>
+            <button id="repMakeRowsBtn" type="button">Generate rows</button>
+            <button id="repAddRowBtn" type="button">Add song</button>
+            <button id="repClearBtn" type="button">Clear rows</button>
         </div>
-    `;
+
+        <div id="repRowsContainer" style="display:flex;flex-direction:column;gap:10px;margin-top:8px;"></div>
+
+        <div style="display:flex;gap:12px;align-items:center;margin-top:8px;">
+            <button id="repCreateBtn" type="button">Create Repertoire</button>
+            <span id="repStatus" class="meta" aria-live="polite"></span>
+        </div>
+    </div>
+`;
         enforceLeftAlignment();
 
         const container = $('repRowsContainer');
@@ -605,29 +612,29 @@ console.log('frontpage.js loaded');
             const seconds = (typeof defaults.durationSeconds === 'number') ? defaults.durationSeconds : 30;
 
             const html = `
-            <div id="${id}" class="repSongRow" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;border:1px solid #ddd;padding:8px;">
-                <label style="min-width:160px;">Title
-                    <input class="repTitle" type="text" value="${title}" placeholder="Title">
-                </label>
-                <label style="min-width:160px;">Artist
-                    <input class="repArtist" type="text" value="${artist}" placeholder="Artist">
-                </label>
-                <label style="min-width:140px;">Genre
-                    <select class="repGenre">${GENRES.map(g => `<option value="${escapeHtml(g)}">${escapeHtml(g)}</option>`).join('')}</select>
-                </label>
-                <label style="min-width:100px;">BPM
-                    <input class="repBpm" type="number" min="1" max="300" value="${escapeHtml(bpm)}" style="width:80px;">
-                </label>
-                <label style="min-width:140px;">Mood
-                    <select class="repMood">${MOODS.map(m => `<option value="${escapeHtml(m)}">${escapeHtml(m)}</option>`).join('')}</select>
-                </label>
-                <label style="min-width:120px;display:flex;gap:6px;align-items:center;">Duration
-                    <input class="repMin" type="number" min="0" max="59" value="${minutes}" style="width:60px;"> :
-                    <input class="repSec" type="number" min="0" max="59" value="${seconds}" style="width:60px;">
-                </label>
-                <button type="button" class="repRemoveRowBtn">Remove</button>
-            </div>
-        `;
+        <div id="${id}" class="repSongRow" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;border:1px solid #ddd;padding:8px;">
+            <label style="min-width:160px;">Title
+                <input class="repTitle" type="text" value="${title}" placeholder="Title">
+            </label>
+            <label style="min-width:160px;">Artist
+                <input class="repArtist" type="text" value="${artist}" placeholder="Artist">
+            </label>
+            <label style="min-width:140px;">Genre
+                <select class="repGenre">${GENRES.map(g => `<option value="${escapeHtml(g)}">${escapeHtml(g)}</option>`).join('')}</select>
+            </label>
+            <label style="min-width:100px;">BPM
+                <input class="repBpm" type="number" min="1" max="300" value="${escapeHtml(bpm)}" style="width:80px;">
+            </label>
+            <label style="min-width:140px;">Mood
+                <select class="repMood">${MOODS.map(m => `<option value="${escapeHtml(m)}">${escapeHtml(m)}</option>`).join('')}</select>
+            </label>
+            <label style="min-width:120px;display:flex;gap:6px;align-items:center;">Duration
+                <input class="repMin" type="number" min="0" max="59" value="${minutes}" style="width:60px;"> :
+                <input class="repSec" type="number" min="0" max="59" value="${seconds}" style="width:60px;">
+            </label>
+            <button type="button" class="repRemoveRowBtn">Remove</button>
+        </div>
+    `;
             const tpl = document.createElement('div');
             tpl.innerHTML = html;
             const rowEl = tpl.firstElementChild;
@@ -660,8 +667,6 @@ console.log('frontpage.js loaded');
         }
 
         // Adjust rows to target count without wiping existing input values.
-        // - If increasing: append rows.
-        // - If decreasing: only remove trailing completely blank rows; refuse if data would be lost.
         function adjustRows(targetCount) {
             const existingRows = Array.from(container.querySelectorAll('.repSongRow'));
             const current = existingRows.length;
@@ -685,7 +690,6 @@ console.log('frontpage.js loaded');
             }
             if (neededRemovals > 0) {
                 status.textContent = 'Cannot reduce rows: some trailing rows contain data. Remove them manually first.';
-                // update rowsInput to reflect actual count
                 rowsInput.value = container.querySelectorAll('.repSongRow').length;
             }
         }
@@ -710,7 +714,10 @@ console.log('frontpage.js loaded');
                 status.textContent = 'Enter a name for the repertoire.';
                 return;
             }
-            const isPublic = $('repPublic').checked;
+
+            // read the visibility from the dropdown
+            const visibilitySel = $('repVisibility');
+            const visibility = visibilitySel ? (visibilitySel.value || 'PRIVATE') : 'PRIVATE';
 
             // collect song rows
             const songEls = Array.from(container.querySelectorAll('.repSongRow'));
@@ -751,7 +758,7 @@ console.log('frontpage.js loaded');
 
             const payload = {
                 name: name,
-                visibility: isPublic ? 'PUBLIC' : 'PRIVATE',
+                visibility: visibility,
                 songs: songs
             };
 
@@ -772,8 +779,6 @@ console.log('frontpage.js loaded');
             } catch (e) {
                 const msg = String(e && e.message ? e.message : e);
                 if (/HTTP\s*403/.test(msg)) {
-                    // Do not perform an automatic GET/refresh (that previously triggered logout/redirect behavior).
-                    // Instead inform the user and keep them in the auth view so they can refresh or re-login manually.
                     status.textContent = 'Forbidden — CSRF token missing or expired. Refresh the page or re-login and try again.';
                     return;
                 }
