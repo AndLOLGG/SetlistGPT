@@ -19,6 +19,10 @@ import java.util.stream.Collectors;
 
 /**
  * Service handling song retrieval, filtering, setlist building and persistence.
+ *
+ * - Builder methods produce a list of Song entities that can be persisted as a Setlist.
+ * - Persistence helpers create Setlist and SetlistItem entities and keep both sides of relationships in sync.
+ * - New: convenience method to create a manual setlist from an ordered list of Song ids.
  */
 @Service
 public class SetlistService {
@@ -36,6 +40,7 @@ public class SetlistService {
     }
 
     // -------------------- Songs --------------------
+
     @Transactional(readOnly = true)
     public List<Song> getAllSongs() {
         return songRepository.findAll();
@@ -59,6 +64,7 @@ public class SetlistService {
     }
 
     // -------------------- Validation --------------------
+
     public boolean validateInput(String title, String artist) {
         boolean t = title != null && !title.trim().isEmpty();
         boolean a = artist != null && !artist.trim().isEmpty();
@@ -66,6 +72,7 @@ public class SetlistService {
     }
 
     // -------------------- Filtering --------------------
+
     @Transactional(readOnly = true)
     public List<Song> filterSongsByCriteria(String title,
                                             String artist,
@@ -90,6 +97,10 @@ public class SetlistService {
     }
 
     // -------------------- Builder --------------------
+    /**
+     * Build a setlist from candidate songs attempting to match target duration,
+     * desired mood and optional BPM. Returns a list of Song entities (not persisted).
+     */
     public List<Song> buildSetList(List<Song> candidates,
                                    int targetDurationSeconds,
                                    String rawMood,
@@ -97,7 +108,7 @@ public class SetlistService {
         if (candidates == null || candidates.isEmpty() || targetDurationSeconds <= 0) return List.of();
         SongMood desiredMood = moodCalculator.parseMood(rawMood);
 
-        // Score songs (simple heuristic).
+        // Score songs (simple heuristic). Consider migrating to MoodCalculator.score(...) for unified logic.
         Map<Long, Double> scoreById = new HashMap<>();
         for (Song s : candidates) {
             double score = 1.0;
@@ -138,6 +149,10 @@ public class SetlistService {
         return result;
     }
 
+    /**
+     * Fill an existing set with reused songs (repeat songs) until target duration reached.
+     * If allowOverflow is false, will avoid exceeding the target.
+     */
     public List<Song> fillSetWithReusedSongs(List<Song> current,
                                              int targetDurationSeconds,
                                              boolean allowOverflow,
@@ -179,17 +194,21 @@ public class SetlistService {
     }
 
     // -------------------- Persistence --------------------
+
+    /**
+     * Persist a built setlist (list of Song entities) into the database.
+     * Uses Setlist.addItem(...) to keep bidirectional relationships consistent.
+     */
     @Transactional
     public void saveBuiltSetlist(Profile owner, String title, List<Song> songs) {
         if (songs == null) throw new IllegalArgumentException("songs required");
         String t = (title == null || title.isBlank()) ? "Setlist" : title.trim();
 
         Setlist entity = new Setlist();
-        entity.setOwner(owner); // owner may be null (guest build)
+        entity.setOwner(owner); // may be null (guest)
         entity.setTitle(t);
-        entity.setCreatedAt(LocalDateTime.now());
+        // createdAt is handled by Setlist.onCreate() @PrePersist — avoid setting it here.
 
-        List<SetlistItem> items = new ArrayList<>(songs.size());
         int idx = 0;
         int totalSeconds = 0;
         for (Song s : songs) {
@@ -197,21 +216,50 @@ public class SetlistService {
             SetlistItem item = new SetlistItem();
             item.setPositionIndex(idx++);
             item.setSong(s);
-            item.setReused(false); // original build phase
-            items.add(item);
+            item.setReused(false);
+            entity.addItem(item); // keeps both sides in sync
             totalSeconds += s.getDurationInSeconds();
         }
-        entity.setItems(items);
         entity.setTotalDurationSeconds(totalSeconds);
         setlistRepository.save(entity);
     }
 
-    // Convenience that resolves session owner automatically.
+    /**
+     * Convenience variant that resolves the owner from the current HTTP session.
+     */
     @Transactional
     public void saveBuiltSetlist(String title, List<Song> songs) {
         Profile owner = resolveSessionProfile();
         saveBuiltSetlist(owner, title, songs);
     }
+
+    /**
+     * Persist a manual setlist created by the user from an ordered list of Song ids.
+     * - Preserves the provided order.
+     * - Ignores ids that are not found.
+     * - Saves resulting Setlist (owner may be null).
+     */
+    @Transactional
+    public void saveManualSetlist(Profile owner, String title, List<Long> songIds) {
+        if (songIds == null) throw new IllegalArgumentException("songIds required");
+        if (songIds.isEmpty()) throw new IllegalArgumentException("songIds cannot be empty");
+
+        // Fetch all songs present and preserve order based on incoming ids.
+        List<Song> fetched = songRepository.findAllById(songIds);
+        Map<Long, Song> byId = fetched.stream().filter(Objects::nonNull)
+                .collect(Collectors.toMap(Song::getId, s -> s));
+
+        List<Song> ordered = songIds.stream()
+                .map(byId::get)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toList());
+
+        if (ordered.isEmpty()) throw new IllegalArgumentException("no valid songs found for provided ids");
+
+        saveBuiltSetlist(owner, title, ordered);
+    }
+
+    // -------------------- Listing --------------------
 
     @Transactional(readOnly = true)
     public List<SetlistSummaryDto> listSetlists() {
@@ -221,6 +269,7 @@ public class SetlistService {
     }
 
     // -------------------- Session helper --------------------
+
     private Profile resolveSessionProfile() {
         ServletRequestAttributes attrs = (ServletRequestAttributes) RequestContextHolder.getRequestAttributes();
         if (attrs == null) return null;
@@ -233,6 +282,7 @@ public class SetlistService {
     }
 
     // -------------------- Internal helpers --------------------
+
     private static String normOrNull(String s) {
         if (s == null) return null;
         String n = s.trim();
@@ -258,5 +308,32 @@ public class SetlistService {
         Set<SongGenre> group = SongGenreGroup.resolve(raw);
         if (group != null) return group;
         return parseGenre(raw);
+    }
+
+    // -------------------- DTO persistence helpers --------------------
+    @Transactional
+    public void saveBuiltSetlistFromDtos(Profile owner, String title, List<dk.ek.setlistgpt.song.SongDto> dtos) {
+        if (dtos == null) throw new IllegalArgumentException("songs required");
+        List<Song> songs = new ArrayList<>(dtos.size());
+        for (dk.ek.setlistgpt.song.SongDto dto : dtos) {
+            if (dto == null) continue;
+            Song song = null;
+            if (dto.getId() != null) {
+                song = songRepository.findById(dto.getId()).orElse(null);
+            }
+            if (song == null) {
+                song = new Song();
+                song.setTitle(dto.getTitle());
+                song.setArtist(dto.getArtist());
+                song.setGenre(dto.getGenre());
+                song.setBpm(dto.getBpm());
+                song.setMood(dto.getMood());
+                song.setDurationMinutes(dto.getDurationMinutes());
+                song.setDurationSeconds(dto.getDurationSeconds());
+                song = songRepository.save(song);
+            }
+            songs.add(song);
+        }
+        saveBuiltSetlist(owner, title, songs);
     }
 }
